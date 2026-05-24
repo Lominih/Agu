@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,12 +16,19 @@ from app.core.config import (
     REAL_DATA_PATH,
     REFRESH_LOG_PATH,
 )
-from app.services.dataset import FEATURE_COLUMNS, build_features, latest_snapshot, load_price_data
+from app.services.dataset import (
+    FEATURE_COLUMNS,
+    build_features,
+    build_scoring_frame,
+    latest_snapshot,
+    load_price_data,
+)
+from app.services.market_watch import get_watchlist_history, merge_live_and_close
 from app.services.modeling import load_model, score_snapshot, train_model
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
 
-app = FastAPI(title="A股选股模型", version="0.3.0")
+app = FastAPI(title="A股选股模型", version="0.4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,23 +57,25 @@ def ensure_model(source: str = "real") -> dict:
     state_source = resolve_state_source(source)
     data_source, data_path = get_data_path(state_source)
     prices = load_price_data(data_path, source=data_source, allow_remote_fetch=False)
-    features = build_features(prices)
+    train_features = build_features(prices)
+    scoring_frame = build_scoring_frame(prices)
 
     trained = False
     metrics: dict | None = None
     if not DEFAULT_MODEL_PATH.exists():
-        metrics = train_model(features, DEFAULT_MODEL_PATH)
+        metrics = train_model(train_features, DEFAULT_MODEL_PATH)
         trained = True
 
     model = load_model(DEFAULT_MODEL_PATH)
-    snapshot = latest_snapshot(features)
+    snapshot = latest_snapshot(scoring_frame)
     ranked = score_snapshot(model, snapshot)
 
     return {
         "trained": trained,
         "metrics": metrics,
         "prices": prices,
-        "features": features,
+        "train_features": train_features,
+        "scoring_frame": scoring_frame,
         "ranked": ranked,
         "source": data_source,
     }
@@ -83,6 +92,12 @@ def get_refresh_script() -> Path:
     return BASE_DIR / "scripts" / "refresh_real_data.py"
 
 
+def get_watch_symbols(limit: int = 8, source: str = "real") -> list[str]:
+    state = ensure_model(source)
+    ranked = state["ranked"].head(limit)
+    return [str(symbol).zfill(6) for symbol in ranked["symbol"].tolist()]
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(frontend_dir / "index.html")
@@ -97,7 +112,7 @@ def health() -> dict:
 def overview(source: str = "real") -> dict:
     state = ensure_model(source)
     prices = state["prices"]
-    features = state["features"]
+    train_features = state["train_features"]
     ranked = state["ranked"]
 
     latest_date = ranked["date"].max().strftime("%Y-%m-%d")
@@ -107,7 +122,7 @@ def overview(source: str = "real") -> dict:
         "latest_date": latest_date,
         "universe_size": int(prices["symbol"].nunique()),
         "feature_count": len(FEATURE_COLUMNS),
-        "sample_rows": int(len(features)),
+        "sample_rows": int(len(train_features)),
         "data_source": state["source"],
         "pool": str(prices["pool"].iloc[0]) if "pool" in prices.columns and not prices.empty else "sample",
         "top_pick": {
@@ -138,6 +153,19 @@ def picks(limit: int = 8, source: str = "real") -> dict:
             }
         )
     return {"items": records, "source": state["source"]}
+
+
+@app.get("/api/watchlist")
+def watchlist(limit: int = 8, source: str = "real") -> dict:
+    symbols = get_watch_symbols(limit=limit, source=source)
+    items = merge_live_and_close(symbols)
+    return {"items": items, "source": source}
+
+
+@app.get("/api/watch-history/{symbol}")
+def watch_history(symbol: str, limit: int = 60) -> dict:
+    items = get_watchlist_history(symbol, limit=limit)
+    return {"items": items, "symbol": str(symbol).zfill(6)}
 
 
 @app.post("/api/train")

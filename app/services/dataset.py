@@ -174,6 +174,25 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return working
 
 
+def build_scoring_frame(df: pd.DataFrame) -> pd.DataFrame:
+    working = df.copy().sort_values(["symbol", "date"]).reset_index(drop=True)
+    grouped = working.groupby("symbol", group_keys=False)
+
+    working["ret_5"] = grouped["close"].pct_change(5)
+    working["ret_10"] = grouped["close"].pct_change(10)
+    working["volatility_10"] = grouped["close"].pct_change().rolling(10).std().reset_index(level=0, drop=True)
+    working["ma_10"] = grouped["close"].rolling(10).mean().reset_index(level=0, drop=True)
+    working["ma_20"] = grouped["close"].rolling(20).mean().reset_index(level=0, drop=True)
+    working["volume_ma_5"] = grouped["volume"].rolling(5).mean().reset_index(level=0, drop=True)
+
+    working["price_vs_ma10"] = working["close"] / working["ma_10"] - 1
+    working["price_vs_ma20"] = working["close"] / working["ma_20"] - 1
+    working["volume_ratio_5"] = working["volume"] / working["volume_ma_5"]
+
+    working = working.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+    return working
+
+
 def latest_snapshot(feature_df: pd.DataFrame) -> pd.DataFrame:
     latest_date = feature_df["date"].max()
     snapshot = feature_df.loc[feature_df["date"] == latest_date].copy()

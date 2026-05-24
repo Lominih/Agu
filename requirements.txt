@@ -6,3 +6,4 @@ scikit-learn==1.6.1
 lightgbm==4.6.0
 akshare==1.16.84
 python-multipart==0.0.20
+easyquotation==0.7.7

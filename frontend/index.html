@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>A股 AI 选股模型控制台</title>
+    <title>A股 AI 选股与盯盘控制台</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
@@ -11,16 +11,17 @@
       <section class="hero">
         <div class="hero-copy">
           <p class="eyebrow">A-Share Local Lab</p>
-          <h1>A股 AI 选股模型</h1>
+          <h1>A股 AI 选股与盯盘</h1>
           <p class="subtitle">
-            本地网页优先展示已经准备好的结果。真实 A 股数据刷新会在后台脚本中执行，
-            不会再阻塞页面请求；即使刷新失败，页面也仍然可以继续使用本地已有数据或样例数据。
+            白天看模型候选股的实时快照，晚上和非交易时段也能回看上个交易日收盘状态与更早历史。
+            页面默认优先展示本地真实 A 股数据，并叠加实时行情源做盯盘。
           </p>
         </div>
         <div class="hero-actions">
           <button id="refreshBtn" class="primary">刷新候选股</button>
           <button id="trainBtn" class="secondary">重新训练模型</button>
           <button id="syncBtn" class="secondary">后台刷新真实数据</button>
+          <button id="watchBtn" class="secondary">刷新盯盘快照</button>
         </div>
       </section>
 
@@ -43,8 +44,11 @@
 
       <section class="panel">
         <div class="panel-head">
-          <h2>今日候选股</h2>
-          <p id="latestDate">加载中...</p>
+          <div>
+            <h2>模型候选股</h2>
+            <p id="latestDate">加载中...</p>
+          </div>
+          <p id="watchSource">盯盘快照加载中...</p>
         </div>
         <div class="table-wrap">
           <table>
@@ -59,6 +63,55 @@
               </tr>
             </thead>
             <tbody id="picksTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>实时盯盘</h2>
+            <p>白天优先显示实时行情，非交易时段回看最近收盘状态</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代码</th>
+                <th>名称</th>
+                <th>模式</th>
+                <th>日期</th>
+                <th>时间</th>
+                <th>最新价</th>
+                <th>涨跌幅</th>
+                <th>昨收</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="watchTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>单股历史回看</h2>
+            <p id="historyTitle">点击上方“查看历史”查看最近收盘走势</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>收盘价</th>
+                <th>涨跌幅</th>
+                <th>成交量</th>
+              </tr>
+            </thead>
+            <tbody id="historyTable"></tbody>
           </table>
         </div>
       </section>

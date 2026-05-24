@@ -1,10 +1,15 @@
 const overviewCards = document.querySelector("#overviewCards");
 const picksTable = document.querySelector("#picksTable");
+const watchTable = document.querySelector("#watchTable");
+const historyTable = document.querySelector("#historyTable");
+const historyTitle = document.querySelector("#historyTitle");
 const latestDate = document.querySelector("#latestDate");
+const watchSource = document.querySelector("#watchSource");
 const statusBox = document.querySelector("#statusBox");
 const refreshBtn = document.querySelector("#refreshBtn");
 const trainBtn = document.querySelector("#trainBtn");
 const syncBtn = document.querySelector("#syncBtn");
+const watchBtn = document.querySelector("#watchBtn");
 const taskState = document.querySelector("#taskState");
 const lastRefreshAt = document.querySelector("#lastRefreshAt");
 const lastRefreshResult = document.querySelector("#lastRefreshResult");
@@ -12,6 +17,7 @@ const lastRefreshResult = document.querySelector("#lastRefreshResult");
 const defaultSource = "real";
 const defaultPool = "hs300";
 let refreshPollTimer = null;
+let currentWatchItems = [];
 
 function setStatus(message) {
   statusBox.textContent = `${new Date().toLocaleString("zh-CN")}\n${message}`;
@@ -59,8 +65,7 @@ function renderTaskStatus(status) {
   }
   lastRefreshResult.textContent = details.join(" | ") || "暂无";
 
-  const running = status.state === "running";
-  syncBtn.disabled = running;
+  syncBtn.disabled = status.state === "running";
 }
 
 function stopRefreshPolling() {
@@ -92,7 +97,7 @@ function startRefreshPolling() {
       if (status.state === "success") {
         stopRefreshPolling();
         setStatus(`真实数据后台刷新完成。\n${JSON.stringify(status.metrics || {}, null, 2)}`);
-        await loadDashboard();
+        await initializeDashboard();
       } else if (status.state === "failed") {
         stopRefreshPolling();
         setStatus(`真实数据后台刷新失败: ${status.error || status.message || "未知错误"}`);
@@ -126,12 +131,12 @@ function renderCards(overview) {
     {
       label: "训练样本",
       value: `${overview.sample_rows}`,
-      hint: "具备标签和特征的有效样本行数",
+      hint: "用于训练的有效历史样本行数",
     },
     {
       label: "数据来源",
-      value: overview.data_source === "real" ? "AKShare 本地快照" : "样例数据",
-      hint: overview.data_source === "real" ? "页面只读取本地已刷新完成的真实数据文件" : "未检测到真实数据时自动回退",
+      value: overview.data_source === "real" ? "本地真实数据" : "样例数据",
+      hint: overview.data_source === "real" ? "打分优先使用本地真实数据文件" : "未检测到真实数据时自动回退",
     },
     {
       label: "股票池",
@@ -177,16 +182,63 @@ function renderPicks(items) {
     .join("");
 }
 
-async function loadDashboard() {
-  setStatus("正在加载本地候选股结果...");
+function renderWatch(items) {
+  currentWatchItems = items;
+  watchSource.textContent = items.some((item) => item.mode === "live")
+    ? "当前含实时快照"
+    : "当前显示最近收盘状态";
 
+  watchTable.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${item.symbol}</td>
+          <td>${item.name || "-"}</td>
+          <td>${item.mode === "live" ? "实时" : "收盘"}</td>
+          <td>${item.trade_date || "-"}</td>
+          <td>${item.trade_time || "-"}</td>
+          <td>${item.price ?? "-"}</td>
+          <td>${item.change_pct ?? "-"}</td>
+          <td>${item.pre_close ?? item.fallback_close ?? "-"}</td>
+          <td><button class="mini-btn" data-symbol="${item.symbol}" data-name="${item.name || ""}">查看历史</button></td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function renderHistory(symbol, items) {
+  if (!items.length) {
+    historyTitle.textContent = `${symbol} 暂无本地历史数据`;
+    historyTable.innerHTML = `<tr><td colspan="4">暂无数据</td></tr>`;
+    return;
+  }
+
+  historyTitle.textContent = `${symbol} ${items[items.length - 1].name || ""} 最近 ${items.length} 个交易日`;
+  historyTable.innerHTML = items
+    .slice()
+    .reverse()
+    .map(
+      (item) => `
+        <tr>
+          <td>${item.date}</td>
+          <td>${item.close}</td>
+          <td>${item.change_pct ?? "-"}</td>
+          <td>${item.volume}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+async function loadDashboard() {
   const [overviewRes, picksRes] = await Promise.all([
     fetch(`/api/overview?source=${defaultSource}`),
     fetch(`/api/picks?limit=8&source=${defaultSource}`),
   ]);
 
   if (!overviewRes.ok || !picksRes.ok) {
-    throw new Error("接口请求失败");
+    throw new Error("候选股接口请求失败");
   }
 
   const overview = await overviewRes.json();
@@ -198,8 +250,37 @@ async function loadDashboard() {
   if (overview.trained_now && overview.training_metrics) {
     setStatus(`首次加载时自动完成训练。\n${JSON.stringify(overview.training_metrics, null, 2)}`);
   } else {
-    setStatus(`页面已刷新，当前使用 ${overview.data_source === "real" ? "本地真实数据快照" : "样例数据"} 打分。`);
+    setStatus(`页面已刷新，当前使用 ${overview.data_source === "real" ? "本地真实数据" : "样例数据"} 进行打分。`);
   }
+}
+
+async function loadWatchlist() {
+  const response = await fetch("/api/watchlist?limit=8&source=real");
+  if (!response.ok) {
+    throw new Error("盯盘快照加载失败");
+  }
+
+  const payload = await response.json();
+  renderWatch(payload.items);
+
+  if (payload.items.length) {
+    await loadHistory(payload.items[0].symbol);
+  }
+}
+
+async function loadHistory(symbol) {
+  const response = await fetch(`/api/watch-history/${symbol}?limit=30`);
+  if (!response.ok) {
+    throw new Error("历史数据加载失败");
+  }
+
+  const payload = await response.json();
+  renderHistory(payload.symbol, payload.items);
+}
+
+async function initializeDashboard() {
+  setStatus("正在加载候选股与盯盘信息...");
+  await Promise.all([loadDashboard(), loadWatchlist(), syncRefreshStatus()]);
 }
 
 async function retrain() {
@@ -212,7 +293,7 @@ async function retrain() {
       throw new Error(payload.detail || "训练请求失败");
     }
     setStatus(`${payload.message}\n${JSON.stringify(payload.metrics, null, 2)}`);
-    await loadDashboard();
+    await initializeDashboard();
   } finally {
     trainBtn.disabled = false;
   }
@@ -244,8 +325,16 @@ async function refreshRealData() {
 
 refreshBtn.addEventListener("click", () => {
   loadDashboard().catch((error) => {
-    setStatus(`刷新失败: ${error.message}`);
+    setStatus(`候选股刷新失败: ${error.message}`);
   });
+});
+
+watchBtn.addEventListener("click", () => {
+  loadWatchlist()
+    .then(() => setStatus("盯盘快照已刷新。"))
+    .catch((error) => {
+      setStatus(`盯盘快照刷新失败: ${error.message}`);
+    });
 });
 
 trainBtn.addEventListener("click", () => {
@@ -260,8 +349,30 @@ syncBtn.addEventListener("click", () => {
   });
 });
 
-Promise.all([loadDashboard(), syncRefreshStatus()])
-  .then(([, status]) => {
+watchTable.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !target.matches("[data-symbol]")) {
+    return;
+  }
+
+  const symbol = target.dataset.symbol;
+  if (!symbol) {
+    return;
+  }
+
+  loadHistory(symbol)
+    .then(() => {
+      const item = currentWatchItems.find((entry) => entry.symbol === symbol);
+      setStatus(`已加载 ${symbol} ${item?.name || ""} 的历史回看。`);
+    })
+    .catch((error) => {
+      setStatus(`历史回看加载失败: ${error.message}`);
+    });
+});
+
+initializeDashboard()
+  .then(async () => {
+    const status = await syncRefreshStatus();
     if (status.state === "running") {
       setStatus("检测到后台刷新任务仍在运行，正在持续轮询状态...");
       startRefreshPolling();
