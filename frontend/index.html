@@ -3,124 +3,253 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>A股 AI 选股与盯盘控制台</title>
+    <title>A-Share Local Lab</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <div class="hero-copy">
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
           <p class="eyebrow">A-Share Local Lab</p>
           <h1>A股 AI 选股与盯盘</h1>
-          <p class="subtitle">
-            白天看模型候选股的实时快照，晚上和非交易时段也能回看上个交易日收盘状态与更早历史。
-            页面默认优先展示本地真实 A 股数据，并叠加实时行情源做盯盘。
+          <p class="sidebar-copy">
+            左侧切换候选股、实时盯盘和自选股票，右侧固定历史回看。未选择个股时，默认展示上证指数。
           </p>
         </div>
-        <div class="hero-actions">
-          <button id="refreshBtn" class="primary">刷新候选股</button>
-          <button id="trainBtn" class="secondary">重新训练模型</button>
-          <button id="syncBtn" class="secondary">后台刷新真实数据</button>
-          <button id="watchBtn" class="secondary">刷新盯盘快照</button>
-        </div>
-      </section>
 
-      <section class="cards" id="overviewCards"></section>
+        <nav class="sidebar-nav">
+          <button class="nav-item active" data-page="home" type="button">首页</button>
+          <button class="nav-item" data-page="picks" type="button">模型候选股</button>
+          <button class="nav-item" data-page="watch" type="button">实时盯盘</button>
+          <button class="nav-item" data-page="watchlist" type="button">自选股票</button>
+        </nav>
 
-      <section class="panel status-grid">
-        <div>
-          <div class="status-label">刷新任务状态</div>
-          <div id="taskState" class="status-value">等待检查</div>
+        <div class="sidebar-footer">
+          <div class="sidebar-chip">本地运行</div>
+          <div class="sidebar-chip">固定回看</div>
         </div>
-        <div>
-          <div class="status-label">最近刷新时间</div>
-          <div id="lastRefreshAt" class="status-value">暂无</div>
-        </div>
-        <div>
-          <div class="status-label">最近刷新结果</div>
-          <div id="lastRefreshResult" class="status-value">尚未启动真实数据刷新任务</div>
-        </div>
-      </section>
+      </aside>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>模型候选股</h2>
-            <p id="latestDate">加载中...</p>
-          </div>
-          <p id="watchSource">盯盘快照加载中...</p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>代码</th>
-                <th>名称</th>
-                <th>收盘价</th>
-                <th>5日收益</th>
-                <th>10日收益</th>
-                <th>预测未来5日</th>
-              </tr>
-            </thead>
-            <tbody id="picksTable"></tbody>
-          </table>
-        </div>
-      </section>
+      <section class="content-area">
+        <div class="content-pages">
+          <section class="page active" data-page="home">
+            <section class="hero hero-home">
+              <div class="hero-copy">
+                <p class="eyebrow">A-Share Local Lab</p>
+                <h2>A股 AI 选股与盯盘</h2>
+                <p class="subtitle">
+                  左侧看候选股和盯盘列表，右上角固定单股历史回看。未选择个股时，默认展示上证指数，更接近看盘软件的工作台体验。
+                </p>
+              </div>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>实时盯盘</h2>
-            <p>白天优先显示实时行情，非交易时段回看最近收盘状态</p>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>代码</th>
-                <th>名称</th>
-                <th>模式</th>
-                <th>日期</th>
-                <th>时间</th>
-                <th>最新价</th>
-                <th>涨跌幅</th>
-                <th>昨收</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="watchTable"></tbody>
-          </table>
-        </div>
-      </section>
+              <div class="hero-actions">
+                <button id="refreshBtn" class="primary" type="button">刷新候选股</button>
+                <button id="trainBtn" class="secondary" type="button">重新训练模型</button>
+                <button id="syncBtn" class="secondary" type="button">后台刷新真实数据</button>
+                <button id="watchBtn" class="secondary" type="button">刷新盯盘快照</button>
+              </div>
+            </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>单股历史回看</h2>
-            <p id="historyTitle">点击上方“查看历史”查看最近收盘走势</p>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>日期</th>
-                <th>收盘价</th>
-                <th>涨跌幅</th>
-                <th>成交量</th>
-              </tr>
-            </thead>
-            <tbody id="historyTable"></tbody>
-          </table>
-        </div>
-      </section>
+            <section class="cards home-cards" id="overviewCards"></section>
 
-      <section class="panel log-panel">
-        <div class="panel-head">
-          <h2>运行状态</h2>
+            <section class="panel status-grid">
+              <div class="status-card">
+                <div class="status-label">刷新任务状态</div>
+                <div id="taskState" class="status-value">等待检查</div>
+              </div>
+              <div class="status-card">
+                <div class="status-label">最近刷新时间</div>
+                <div id="lastRefreshAt" class="status-value">暂无</div>
+              </div>
+              <div class="status-card status-card-wide">
+                <div class="status-label">最近刷新结果</div>
+                <div id="lastRefreshResult" class="status-value">尚未启动真实数据刷新任务</div>
+              </div>
+            </section>
+
+            <section class="panel panel-fill log-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>运行状态</h3>
+                  <p>动作、训练与刷新日志会在这里即时显示</p>
+                </div>
+              </div>
+              <pre id="statusBox">等待加载...</pre>
+            </section>
+          </section>
+
+          <section class="page" data-page="picks">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>模型候选股</h3>
+                  <p id="latestDate">加载中...</p>
+                </div>
+                <p>模型按未来 5 日预测收益排序，可直接切到右侧历史回看。</p>
+              </div>
+
+              <div class="table-wrap table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>代码</th>
+                      <th>名称</th>
+                      <th>收盘价</th>
+                      <th>5日收益</th>
+                      <th>10日收益</th>
+                      <th>预测未来5日</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="picksTable"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section class="page" data-page="watch">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>实时盯盘</h3>
+                  <p id="watchSource">盯盘快照加载中...</p>
+                </div>
+                <p>交易时段优先显示实时快照，非交易时段回看最近收盘数据。</p>
+              </div>
+
+              <div class="table-wrap table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>代码</th>
+                      <th>名称</th>
+                      <th>模式</th>
+                      <th>日期</th>
+                      <th>时间</th>
+                      <th>最新价</th>
+                      <th>涨跌幅</th>
+                      <th>昨收</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="watchTable"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section class="page" data-page="watchlist">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>自选股票</h3>
+                  <p id="watchlistSummary">本地保存搜索添加的股票，支持实时快照、删除和切到右侧历史回看。</p>
+                </div>
+                <div class="watchlist-head-actions"></div>
+              </div>
+
+              <div class="watchlist-shell">
+                <div class="watchlist-toolbar">
+                  <div class="watchlist-pill">自选股池</div>
+                  <div class="watchlist-pill watchlist-pill-muted">本地持久化，不依赖外部账户</div>
+                </div>
+
+                <div class="table-wrap table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>模式</th>
+                        <th>日期</th>
+                        <th>时间</th>
+                        <th>最新价</th>
+                        <th>涨跌幅</th>
+                        <th>加入时间</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="watchlistTable"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </section>
         </div>
-        <pre id="statusBox">等待加载...</pre>
+
+        <aside class="history-dock">
+          <section class="panel panel-fill history-panel">
+            <div class="panel-head history-head">
+              <div>
+                <h3>历史回看</h3>
+                <p id="historyTitle">默认显示上证指数，点击左侧“查看历史”切换个股。</p>
+              </div>
+              <div class="history-head-actions">
+                <button id="historyBackBtn" class="history-mode-btn" type="button" hidden>返回K线</button>
+                <div class="history-badge" id="historyBadge">上证指数</div>
+              </div>
+            </div>
+
+            <div class="search-box">
+              <input
+                id="stockSearchInput"
+                type="text"
+                placeholder="搜索股票代码或名称，例如 600519 / 茅台"
+                autocomplete="off"
+              />
+              <div id="searchResults" class="search-results search-results-rich"></div>
+            </div>
+
+            <div class="history-toolbar">
+              <div class="history-toolbar-group">
+                <span class="history-toolbar-label">时间周期</span>
+                <div class="history-toolbar-buttons" id="historyPeriodTabs">
+                  <button class="history-tool-btn active" data-period="day" type="button">日</button>
+                  <button class="history-tool-btn" data-period="week" type="button">周</button>
+                  <button class="history-tool-btn" data-period="month" type="button">月</button>
+                  <button class="history-tool-btn" data-period="quarter" type="button">季</button>
+                  <button class="history-tool-btn" data-period="year" type="button">年</button>
+                  <button class="history-tool-btn" data-period="1m" type="button">1分</button>
+                  <button class="history-tool-btn" data-period="5m" type="button">5分</button>
+                  <button class="history-tool-btn" data-period="15m" type="button">15分</button>
+                  <button class="history-tool-btn" data-period="30m" type="button">30分</button>
+                  <button class="history-tool-btn" data-period="60m" type="button">60分</button>
+                  <button class="history-tool-btn" data-period="5d" type="button">5日</button>
+                </div>
+              </div>
+
+              <div class="history-toolbar-group history-toolbar-group-right">
+                <span class="history-toolbar-label">图表交互</span>
+                <div class="history-toolbar-buttons">
+                  <button id="historyZoomOutBtn" class="history-tool-btn" type="button">缩小</button>
+                  <button id="historyZoomResetBtn" class="history-tool-btn" type="button">重置</button>
+                  <button id="historyZoomInBtn" class="history-tool-btn" type="button">放大</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-wrap compact-chart">
+              <canvas id="historyChart" width="760" height="320"></canvas>
+              <div id="historyTooltip" class="chart-tooltip" hidden></div>
+            </div>
+
+            <div class="table-wrap table-scroll side-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>开盘</th>
+                    <th>最高</th>
+                    <th>最低</th>
+                    <th>收盘</th>
+                    <th>涨跌幅</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </aside>
       </section>
     </main>
 

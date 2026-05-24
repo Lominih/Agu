@@ -4,10 +4,11 @@ from pathlib import Path
 import subprocess
 import sys
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from app.core.config import (
     BASE_DIR,
@@ -23,7 +24,17 @@ from app.services.dataset import (
     latest_snapshot,
     load_price_data,
 )
-from app.services.market_watch import get_watchlist_history, merge_live_and_close
+from app.services.market_watch import (
+    add_custom_watchlist_item,
+    build_history_payload,
+    delete_custom_watchlist_item,
+    get_custom_watchlist_snapshot,
+    get_intraday_change_history,
+    get_watchlist_history,
+    list_custom_watchlist,
+    merge_live_and_close,
+    search_symbols,
+)
 from app.services.modeling import load_model, score_snapshot, train_model
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
@@ -98,6 +109,12 @@ def get_watch_symbols(limit: int = 8, source: str = "real") -> list[str]:
     return [str(symbol).zfill(6) for symbol in ranked["symbol"].tolist()]
 
 
+class FavoritePayload(BaseModel):
+    symbol: str
+    name: str | None = None
+    kind: str = "stock"
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(frontend_dir / "index.html")
@@ -163,9 +180,67 @@ def watchlist(limit: int = 8, source: str = "real") -> dict:
 
 
 @app.get("/api/watch-history/{symbol}")
-def watch_history(symbol: str, limit: int = 60) -> dict:
+def watch_history(symbol: str, limit: int = 60, period: str = "day") -> dict:
+    if period != "day":
+        return build_history_payload(symbol, period=period, limit=limit)
     items = get_watchlist_history(symbol, limit=limit)
-    return {"items": items, "symbol": str(symbol).zfill(6)}
+    return {"items": items, "symbol": str(symbol).zfill(6), "period": "day", "limit": limit}
+
+
+@app.get("/api/chart-history/{symbol}")
+def chart_history(symbol: str, period: str = "day", limit: int = 120) -> dict:
+    try:
+        return build_history_payload(symbol, period=period, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/history/{symbol}")
+def unified_history(symbol: str, period: str = "day", limit: int = 120) -> dict:
+    try:
+        return build_history_payload(symbol, period=period, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/watch-intraday/{symbol}")
+def watch_intraday(symbol: str, trade_date: str) -> dict:
+    payload = get_intraday_change_history(symbol, trade_date=trade_date)
+    payload["symbol"] = str(symbol)
+    return payload
+
+
+@app.get("/api/search")
+def search(query: str, limit: int = 12) -> dict:
+    items = search_symbols(query, limit=limit)
+    return {"items": items, "query": query}
+
+
+@app.get("/api/favorites")
+def favorites() -> dict:
+    payload = get_custom_watchlist_snapshot()
+    return {"items": payload["items"], "updated_at": payload.get("updated_at")}
+
+
+@app.post("/api/favorites")
+def add_favorite(
+    payload: FavoritePayload | None = Body(default=None),
+    symbol: str | None = None,
+    name: str | None = None,
+    kind: str = "stock",
+) -> dict:
+    target_symbol = payload.symbol if payload else symbol
+    if not target_symbol:
+        raise HTTPException(status_code=400, detail="symbol is required")
+    target_name = payload.name if payload else name
+    target_kind = payload.kind if payload else kind
+    result = add_custom_watchlist_item(symbol=target_symbol, name=target_name, kind=target_kind)
+    return result
+
+
+@app.delete("/api/favorites/{symbol}")
+def delete_favorite(symbol: str, kind: str | None = None) -> dict:
+    return delete_custom_watchlist_item(symbol=symbol, kind=kind)
 
 
 @app.post("/api/train")

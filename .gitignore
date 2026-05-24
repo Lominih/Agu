@@ -6,3 +6,4 @@ models/
 *.joblib
 data/*.csv
 data/status/
+data/custom_watchlist.json
