@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A股选股模型控制台</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">A-Share Local Lab</p>
+          <h1>A股 AI 选股模型</h1>
+          <p class="subtitle">
+            本地训练、本地打分、本地网页查看。先用样例数据跑通完整流程，后续可以替换成真实 A 股数据和实时模拟盘执行。
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refreshBtn" class="primary">刷新选股结果</button>
+          <button id="trainBtn" class="secondary">重新训练模型</button>
+        </div>
+      </section>
+
+      <section class="cards" id="overviewCards"></section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>今日候选股</h2>
+          <p id="latestDate">加载中...</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代码</th>
+                <th>名称</th>
+                <th>收盘价</th>
+                <th>5日收益%</th>
+                <th>10日收益%</th>
+                <th>预测未来5日%</th>
+              </tr>
+            </thead>
+            <tbody id="picksTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-head">
+          <h2>运行状态</h2>
+        </div>
+        <pre id="statusBox">等待加载...</pre>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+  </html>
