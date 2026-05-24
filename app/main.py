@@ -1,16 +1,23 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import DEFAULT_DATA_PATH, DEFAULT_MODEL_PATH, BASE_DIR
-from app.services.dataset import FEATURE_COLUMNS, build_features, latest_snapshot, load_price_data
+from app.core.config import BASE_DIR, DEFAULT_DATA_PATH, DEFAULT_MODEL_PATH, REAL_DATA_PATH
+from app.services.dataset import (
+    FEATURE_COLUMNS,
+    build_features,
+    fetch_real_dataset,
+    load_index_constituents,
+    latest_snapshot,
+    load_price_data,
+)
 from app.services.modeling import load_model, score_snapshot, train_model
 
 
-app = FastAPI(title="A股选股模型", version="0.1.0")
+app = FastAPI(title="A股选股模型", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,8 +30,20 @@ frontend_dir = BASE_DIR / "frontend"
 app.mount("/assets", StaticFiles(directory=frontend_dir), name="assets")
 
 
-def ensure_model() -> dict:
-    prices = load_price_data(DEFAULT_DATA_PATH)
+def get_data_path(source: str) -> tuple[str, object]:
+    if source == "real":
+        return source, REAL_DATA_PATH
+    return "sample", DEFAULT_DATA_PATH
+
+
+def ensure_model(source: str = "real") -> dict:
+    data_source, data_path = get_data_path(source)
+    try:
+        prices = load_price_data(data_path, source=data_source)
+    except Exception:
+        data_source = "sample"
+        _, fallback_path = get_data_path(data_source)
+        prices = load_price_data(fallback_path, source=data_source)
     features = build_features(prices)
 
     trained = False
@@ -43,6 +62,7 @@ def ensure_model() -> dict:
         "prices": prices,
         "features": features,
         "ranked": ranked,
+        "source": data_source,
     }
 
 
@@ -57,8 +77,8 @@ def health() -> dict:
 
 
 @app.get("/api/overview")
-def overview() -> dict:
-    state = ensure_model()
+def overview(source: str = "real") -> dict:
+    state = ensure_model(source)
     prices = state["prices"]
     features = state["features"]
     ranked = state["ranked"]
@@ -71,6 +91,8 @@ def overview() -> dict:
         "universe_size": int(prices["symbol"].nunique()),
         "feature_count": len(FEATURE_COLUMNS),
         "sample_rows": int(len(features)),
+        "data_source": state["source"],
+        "pool": str(prices["pool"].iloc[0]) if "pool" in prices.columns and not prices.empty else "sample",
         "top_pick": {
             "symbol": top_pick["symbol"],
             "name": top_pick["name"],
@@ -82,15 +104,15 @@ def overview() -> dict:
 
 
 @app.get("/api/picks")
-def picks(limit: int = 5) -> dict:
-    state = ensure_model()
+def picks(limit: int = 8, source: str = "real") -> dict:
+    state = ensure_model(source)
     ranked = state["ranked"].head(limit).copy()
     records = []
     for row in ranked.to_dict(orient="records"):
         records.append(
             {
                 "date": row["date"].strftime("%Y-%m-%d"),
-                "symbol": row["symbol"],
+                "symbol": str(row["symbol"]).zfill(6),
                 "name": row["name"],
                 "close": round(float(row["close"]), 2),
                 "ret_5": round(float(row["ret_5"]) * 100, 2),
@@ -98,12 +120,32 @@ def picks(limit: int = 5) -> dict:
                 "predicted_return_5": round(float(row["predicted_return_5"]) * 100, 2),
             }
         )
-    return {"items": records}
+    return {"items": records, "source": state["source"]}
 
 
 @app.post("/api/train")
-def retrain() -> dict:
-    prices = load_price_data(DEFAULT_DATA_PATH)
+def retrain(source: str = "real") -> dict:
+    state_source, data_path = get_data_path(source)
+    prices = load_price_data(data_path, source=state_source)
     features = build_features(prices)
     metrics = train_model(features, DEFAULT_MODEL_PATH)
-    return {"message": "模型已重新训练", "metrics": metrics}
+    return {"message": "模型已重新训练", "metrics": metrics, "source": state_source}
+
+
+@app.post("/api/refresh-real-data")
+def refresh_real_data(pool: str = "hs300") -> dict:
+    try:
+        symbols = load_index_constituents(pool)
+        prices = fetch_real_dataset(REAL_DATA_PATH, symbols=symbols, pool=pool)
+        features = build_features(prices)
+        metrics = train_model(features, DEFAULT_MODEL_PATH)
+    except Exception as exc:  # pragma: no cover - surfacing runtime integration issues
+        raise HTTPException(status_code=502, detail=f"刷新真实A股数据失败: {exc}") from exc
+
+    return {
+        "message": "真实A股数据已刷新并完成训练",
+        "rows": int(len(prices)),
+        "symbols": int(prices["symbol"].nunique()),
+        "pool": pool,
+        "metrics": metrics,
+    }
