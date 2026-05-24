@@ -20,6 +20,11 @@ FEATURE_COLUMNS = [
     "volume_ratio_5",
 ]
 
+CSI_CONS_COLUMNS = {
+    "成分券代码": "symbol",
+    "成分券名称": "name",
+}
+
 
 def generate_sample_dataset(output_path: Path) -> pd.DataFrame:
     """Generate a local sample dataset so the app can run without remote data."""
@@ -61,7 +66,11 @@ def load_index_constituents(pool: str = "hs300") -> list[tuple[str, str]]:
         meta = INDEX_POOLS.get(pool, INDEX_POOLS["hs300"])
         cons_df = ak.index_stock_cons_csindex(symbol=meta["symbol"])
 
-    cons_df = cons_df.rename(columns={"成分券代码": "symbol", "成分券名称": "name"})
+    cons_df = cons_df.rename(columns=CSI_CONS_COLUMNS)
+    missing_columns = {"symbol", "name"} - set(cons_df.columns)
+    if missing_columns:
+        raise RuntimeError(f"指数成分股字段缺失: {sorted(missing_columns)}")
+
     cons_df["symbol"] = cons_df["symbol"].astype(str).str.zfill(6)
     cons_df = cons_df[["symbol", "name"]].drop_duplicates(subset=["symbol"]).reset_index(drop=True)
     return list(cons_df.itertuples(index=False, name=None))
@@ -85,15 +94,16 @@ def fetch_real_dataset(
     symbols: list[tuple[str, str]] | None = None,
     start_date: str = "2023-01-01",
     pool: str = "hs300",
+    max_workers: int | None = None,
 ) -> pd.DataFrame:
     """Fetch A-share daily bars from AKShare for an index-based symbol universe."""
     symbol_list = symbols or load_index_constituents(pool)
     start_ts = pd.Timestamp(start_date)
     frames: list[pd.DataFrame] = []
     errors: list[str] = []
-    max_workers = min(8, max(4, len(symbol_list) // 60 or 4))
+    worker_count = max_workers or min(8, max(4, len(symbol_list) // 60 or 4))
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
         future_map = {
             executor.submit(_fetch_one_symbol, symbol, name, start_ts, pool): (symbol, name)
             for symbol, name in symbol_list
@@ -108,7 +118,7 @@ def fetch_real_dataset(
                 errors.append(f"{symbol} {name}: {exc}")
 
     if not frames:
-        raise RuntimeError(f"未能抓取到任何真实A股数据。最近错误: {errors[:3]}")
+        raise RuntimeError(f"未能抓取到任何真实 A 股数据。最近错误: {errors[:3]}")
 
     df = pd.concat(frames, ignore_index=True).sort_values(["symbol", "date"]).reset_index(drop=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,16 +126,24 @@ def fetch_real_dataset(
     return df
 
 
-def load_price_data(csv_path: Path, source: str = "sample") -> pd.DataFrame:
+def load_price_data(
+    csv_path: Path,
+    source: str = "sample",
+    allow_remote_fetch: bool = True,
+) -> pd.DataFrame:
     if not csv_path.exists():
         if source == "real":
-            return fetch_real_dataset(csv_path)
+            if allow_remote_fetch:
+                return fetch_real_dataset(csv_path)
+            raise FileNotFoundError(f"真实数据文件不存在: {csv_path}")
         return generate_sample_dataset(csv_path)
 
     df = pd.read_csv(csv_path, parse_dates=["date"], dtype={"symbol": str, "name": str, "source": str, "pool": str})
     if df.empty:
         if source == "real":
-            return fetch_real_dataset(csv_path)
+            if allow_remote_fetch:
+                return fetch_real_dataset(csv_path)
+            raise ValueError(f"真实数据文件为空: {csv_path}")
         return generate_sample_dataset(csv_path)
 
     df["symbol"] = df["symbol"].astype(str).str.zfill(6)

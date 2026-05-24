@@ -143,6 +143,24 @@ button:hover {
   margin-top: 18px;
 }
 
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.status-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-value {
+  margin-top: 10px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .panel-head {
   display: flex;
   justify-content: space-between;
@@ -205,5 +223,9 @@ td {
 
   button {
     flex: 1 1 180px;
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
   }
 }

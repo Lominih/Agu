@@ -5,3 +5,4 @@ models/
 *.pkl
 *.joblib
 data/*.csv
+data/status/

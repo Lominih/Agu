@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>A股选股模型控制台</title>
+    <title>A股 AI 选股模型控制台</title>
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
@@ -13,18 +13,33 @@
           <p class="eyebrow">A-Share Local Lab</p>
           <h1>A股 AI 选股模型</h1>
           <p class="subtitle">
-            当前版本优先使用 AKShare 拉取真实 A 股历史日线数据进行训练和打分。
-            如果真实数据获取失败，仍然可以切回本地样例模式，保证本地网页始终可运行。
+            本地网页优先展示已经准备好的结果。真实 A 股数据刷新会在后台脚本中执行，
+            不会再阻塞页面请求；即使刷新失败，页面也仍然可以继续使用本地已有数据或样例数据。
           </p>
         </div>
         <div class="hero-actions">
           <button id="refreshBtn" class="primary">刷新候选股</button>
           <button id="trainBtn" class="secondary">重新训练模型</button>
-          <button id="syncBtn" class="secondary">刷新真实数据</button>
+          <button id="syncBtn" class="secondary">后台刷新真实数据</button>
         </div>
       </section>
 
       <section class="cards" id="overviewCards"></section>
+
+      <section class="panel status-grid">
+        <div>
+          <div class="status-label">刷新任务状态</div>
+          <div id="taskState" class="status-value">等待检查</div>
+        </div>
+        <div>
+          <div class="status-label">最近刷新时间</div>
+          <div id="lastRefreshAt" class="status-value">暂无</div>
+        </div>
+        <div>
+          <div class="status-label">最近刷新结果</div>
+          <div id="lastRefreshResult" class="status-value">尚未启动真实数据刷新任务</div>
+        </div>
+      </section>
 
       <section class="panel">
         <div class="panel-head">
@@ -38,9 +53,9 @@
                 <th>代码</th>
                 <th>名称</th>
                 <th>收盘价</th>
-                <th>5日收益%</th>
-                <th>10日收益%</th>
-                <th>预测未来5日%</th>
+                <th>5日收益</th>
+                <th>10日收益</th>
+                <th>预测未来5日</th>
               </tr>
             </thead>
             <tbody id="picksTable"></tbody>
@@ -58,4 +73,4 @@
 
     <script src="/assets/app.js"></script>
   </body>
-  </html>
+</html>

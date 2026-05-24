@@ -1,23 +1,27 @@
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+import sys
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import BASE_DIR, DEFAULT_DATA_PATH, DEFAULT_MODEL_PATH, REAL_DATA_PATH
-from app.services.dataset import (
-    FEATURE_COLUMNS,
-    build_features,
-    fetch_real_dataset,
-    load_index_constituents,
-    latest_snapshot,
-    load_price_data,
+from app.core.config import (
+    BASE_DIR,
+    DEFAULT_DATA_PATH,
+    DEFAULT_MODEL_PATH,
+    REAL_DATA_PATH,
+    REFRESH_LOG_PATH,
 )
+from app.services.dataset import FEATURE_COLUMNS, build_features, latest_snapshot, load_price_data
 from app.services.modeling import load_model, score_snapshot, train_model
+from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
 
-app = FastAPI(title="A股选股模型", version="0.2.0")
+app = FastAPI(title="A股选股模型", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,20 +34,22 @@ frontend_dir = BASE_DIR / "frontend"
 app.mount("/assets", StaticFiles(directory=frontend_dir), name="assets")
 
 
-def get_data_path(source: str) -> tuple[str, object]:
+def get_data_path(source: str) -> tuple[str, Path]:
     if source == "real":
         return source, REAL_DATA_PATH
     return "sample", DEFAULT_DATA_PATH
 
 
+def resolve_state_source(source: str) -> str:
+    if source == "real" and REAL_DATA_PATH.exists():
+        return "real"
+    return "sample"
+
+
 def ensure_model(source: str = "real") -> dict:
-    data_source, data_path = get_data_path(source)
-    try:
-        prices = load_price_data(data_path, source=data_source)
-    except Exception:
-        data_source = "sample"
-        _, fallback_path = get_data_path(data_source)
-        prices = load_price_data(fallback_path, source=data_source)
+    state_source = resolve_state_source(source)
+    data_source, data_path = get_data_path(state_source)
+    prices = load_price_data(data_path, source=data_source, allow_remote_fetch=False)
     features = build_features(prices)
 
     trained = False
@@ -64,6 +70,17 @@ def ensure_model(source: str = "real") -> dict:
         "ranked": ranked,
         "source": data_source,
     }
+
+
+def get_python_executable() -> str:
+    venv_python = BASE_DIR / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        return str(venv_python)
+    return sys.executable
+
+
+def get_refresh_script() -> Path:
+    return BASE_DIR / "scripts" / "refresh_real_data.py"
 
 
 @app.get("/")
@@ -125,27 +142,58 @@ def picks(limit: int = 8, source: str = "real") -> dict:
 
 @app.post("/api/train")
 def retrain(source: str = "real") -> dict:
-    state_source, data_path = get_data_path(source)
-    prices = load_price_data(data_path, source=state_source)
+    state_source = resolve_state_source(source)
+    data_source, data_path = get_data_path(state_source)
+    prices = load_price_data(data_path, source=data_source, allow_remote_fetch=False)
     features = build_features(prices)
     metrics = train_model(features, DEFAULT_MODEL_PATH)
-    return {"message": "模型已重新训练", "metrics": metrics, "source": state_source}
+    return {"message": "模型已重新训练", "metrics": metrics, "source": data_source}
+
+
+@app.get("/api/refresh-real-data/status")
+def refresh_real_data_status() -> dict:
+    return get_runtime_refresh_status()
 
 
 @app.post("/api/refresh-real-data")
 def refresh_real_data(pool: str = "hs300") -> dict:
-    try:
-        symbols = load_index_constituents(pool)
-        prices = fetch_real_dataset(REAL_DATA_PATH, symbols=symbols, pool=pool)
-        features = build_features(prices)
-        metrics = train_model(features, DEFAULT_MODEL_PATH)
-    except Exception as exc:  # pragma: no cover - surfacing runtime integration issues
-        raise HTTPException(status_code=502, detail=f"刷新真实A股数据失败: {exc}") from exc
+    status = get_runtime_refresh_status()
+    if status["state"] == "running":
+        return {
+            "message": "已有真实数据刷新任务在运行",
+            "status": status,
+        }
+
+    python_executable = get_python_executable()
+    script_path = get_refresh_script()
+    REFRESH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    with REFRESH_LOG_PATH.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            [python_executable, str(script_path), "--pool", pool],
+            cwd=str(BASE_DIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    status = write_refresh_status(
+        {
+            "state": "running",
+            "pool": pool,
+            "pid": process.pid,
+            "started_at": None,
+            "finished_at": None,
+            "message": f"后台任务已启动，正在刷新 {pool} 数据",
+            "rows": None,
+            "symbols": None,
+            "metrics": None,
+            "error": None,
+            "log_path": str(REFRESH_LOG_PATH),
+        }
+    )
 
     return {
-        "message": "真实A股数据已刷新并完成训练",
-        "rows": int(len(prices)),
-        "symbols": int(prices["symbol"].nunique()),
-        "pool": pool,
-        "metrics": metrics,
+        "message": "真实数据刷新任务已在后台启动",
+        "status": status,
     }
