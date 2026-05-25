@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>A-Share Local Lab</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260525d" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525m" />
   </head>
   <body>
     <main class="app-shell">
@@ -22,6 +22,7 @@
           <button class="nav-item" data-page="picks" type="button">模型候选股</button>
           <button class="nav-item" data-page="watch" type="button">实时盯盘</button>
           <button class="nav-item" data-page="watchlist" type="button">自选股票</button>
+          <button class="nav-item" data-page="hot" type="button">热点快报</button>
         </nav>
 
         <section class="sidebar-market panel">
@@ -156,7 +157,7 @@
               </div>
 
               <div class="table-wrap table-scroll">
-                <table>
+                <table class="picks-table">
                   <thead>
                     <tr>
                       <th>代码</th>
@@ -165,6 +166,7 @@
                       <th>5日收益</th>
                       <th>10日收益</th>
                       <th>预测未来5日</th>
+                      <th>推荐摘要</th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -239,6 +241,25 @@
                     <tbody id="watchlistTable"></tbody>
                   </table>
                 </div>
+              </div>
+            </section>
+          </section>
+
+          <section class="page" data-page="hot">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>热点快报</h3>
+                  <p id="hotNewsPageMeta">按最新市场快讯聚合，适合快速盯主题、政策和板块催化。</p>
+                </div>
+                <div class="hot-news-head-actions">
+                  <div id="hotNewsFilters" class="hot-news-filters"></div>
+                  <button id="hotNewsRefreshBtnPage" class="secondary hot-news-refresh-btn" type="button">刷新快报</button>
+                </div>
+              </div>
+              <div class="hot-news-scroll">
+                <div id="hotNewsList" class="hot-news-list"></div>
+                <div id="hotNewsLoadMoreHint" class="hot-news-load-more-hint">向下滚动继续加载</div>
               </div>
             </section>
           </section>
@@ -321,6 +342,6 @@
       </section>
     </main>
 
-    <script src="/assets/app.js?v=20260525d"></script>
+    <script src="/assets/app.js?v=20260525m"></script>
   </body>
 </html>

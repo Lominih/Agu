@@ -35,8 +35,9 @@ from app.services.market_watch import (
     merge_live_and_close,
     search_symbols,
 )
+from app.services.hot_news import get_hot_news
 from app.services.market_overview import get_market_overview
-from app.services.modeling import load_model, score_snapshot, train_model
+from app.services.modeling import build_pick_explanations, load_model, score_snapshot, train_model
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
 
@@ -81,6 +82,7 @@ def ensure_model(source: str = "real") -> dict:
     model = load_model(DEFAULT_MODEL_PATH)
     snapshot = latest_snapshot(scoring_frame)
     ranked = score_snapshot(model, snapshot)
+    ranked = build_pick_explanations(model, ranked)
 
     return {
         "trained": trained,
@@ -161,6 +163,14 @@ def market_overview(limit: int = 6) -> dict:
         raise HTTPException(status_code=500, detail=f"market overview unavailable: {exc}") from exc
 
 
+@app.get("/api/hot-news")
+def hot_news(limit: int = 16, offset: int = 0, category: str = "all", force_refresh: bool = False) -> dict:
+    try:
+        return get_hot_news(limit=limit, offset=offset, category=category, force_refresh=force_refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"hot news unavailable: {exc}") from exc
+
+
 @app.get("/api/picks")
 def picks(limit: int = 8, source: str = "real") -> dict:
     state = ensure_model(source)
@@ -176,6 +186,11 @@ def picks(limit: int = 8, source: str = "real") -> dict:
                 "ret_5": round(float(row["ret_5"]) * 100, 2),
                 "ret_10": round(float(row["ret_10"]) * 100, 2),
                 "predicted_return_5": round(float(row["predicted_return_5"]) * 100, 2),
+                "reason_summary": row.get("reason_summary"),
+                "reason_tags": row.get("reason_tags") or [],
+                "reason_texts": row.get("reason_texts") or [],
+                "basis_items": row.get("basis_items") or [],
+                "risk_texts": row.get("risk_texts") or [],
             }
         )
     return {"items": records, "source": state["source"]}

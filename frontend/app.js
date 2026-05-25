@@ -32,6 +32,12 @@ const marketCurrent = document.querySelector("#marketCurrent");
 const marketChange = document.querySelector("#marketChange");
 const marketChangePct = document.querySelector("#marketChangePct");
 const homeUsLeaderList = document.querySelector("#homeUsLeaderList");
+const hotNewsList = document.querySelector("#hotNewsList");
+const hotNewsScroll = hotNewsList?.closest(".hot-news-scroll");
+const hotNewsPageMeta = document.querySelector("#hotNewsPageMeta");
+const hotNewsFilters = document.querySelector("#hotNewsFilters");
+const hotNewsRefreshBtnPage = document.querySelector("#hotNewsRefreshBtnPage");
+const hotNewsLoadMoreHint = document.querySelector("#hotNewsLoadMoreHint");
 const marketChart = document.querySelector("#marketChart");
 const marketTooltip = document.querySelector("#marketTooltip");
 const marketZoomInBtn = document.querySelector("#marketZoomInBtn");
@@ -48,6 +54,7 @@ const defaultSource = "real";
 const defaultPool = "hs300";
 const defaultPicksLimit = 18;
 const defaultWatchLimit = 20;
+const hotNewsPageSize = 24;
 
 const periodLimitMap = {
   day: 120,
@@ -97,6 +104,21 @@ const state = {
   chartHoverIndex: null,
   historyExpanded: false,
   marketOverview: null,
+  hotNews: [],
+  hotNewsOffset: 0,
+  hotNewsTotal: 0,
+  hotNewsHasMore: true,
+  hotNewsLoading: false,
+  hotNewsCategory: "all",
+  hotNewsAvailableCategories: {
+    all: "全部",
+    tech: "科技",
+    finance: "金融",
+    new_energy: "新能源",
+    medicine: "医药",
+    infrastructure: "地产基建",
+    resources: "资源",
+  },
   marketChartItems: [],
   marketChartViewport: { start: 0, end: 0 },
   marketChartGeometry: null,
@@ -165,6 +187,38 @@ function formatNumber(value, digits = 2) {
     return "-";
   }
   return Number(value).toFixed(digits);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getHotNewsCategoryLabel(category = state.hotNewsCategory) {
+  return state.hotNewsAvailableCategories?.[category] || "全部";
+}
+
+function syncHotNewsFilterButton() {
+  if (!(hotNewsFilters instanceof HTMLElement)) {
+    return;
+  }
+  const categories = state.hotNewsAvailableCategories || { all: "全部" };
+  hotNewsFilters.innerHTML = Object.entries(categories)
+    .map(
+      ([key, label]) => `
+        <button
+          class="hot-news-filter-btn ${state.hotNewsCategory === key ? "is-active" : ""}"
+          data-category="${key}"
+          aria-pressed="${state.hotNewsCategory === key ? "true" : "false"}"
+          type="button"
+        >${label}</button>
+      `
+    )
+    .join("");
 }
 
 function getToneClass(changePct) {
@@ -345,19 +399,89 @@ function renderPicks(items) {
   }
 
   picksTable.innerHTML = items
-    .map(
-      (item) => `
-        <tr>
+    .map((item) => {
+      const reasonTags = Array.isArray(item.reason_tags) ? item.reason_tags : [];
+      const reasonTexts = Array.isArray(item.reason_texts) ? item.reason_texts : [];
+      const basisItems = Array.isArray(item.basis_items) ? item.basis_items : [];
+      const riskTexts = Array.isArray(item.risk_texts) ? item.risk_texts : [];
+
+      const tagsMarkup = reasonTags.length
+        ? reasonTags.map((tag) => `<span class="pick-tag">${tag}</span>`).join("")
+        : `<span class="pick-tag">综合因子占优</span>`;
+
+      const reasonsMarkup = reasonTexts.length
+        ? `<div class="pick-detail-block">
+            <div class="pick-detail-title">推荐原因</div>
+            <ul class="pick-detail-list">
+              ${reasonTexts.map((text) => `<li>${text}</li>`).join("")}
+            </ul>
+          </div>`
+        : "";
+
+      const basisMarkup = basisItems.length
+        ? `<div class="pick-detail-block">
+            <div class="pick-detail-title">预测依据</div>
+            <div class="pick-basis-list">
+              ${basisItems
+                .map(
+                  (basis) => `
+                    <div class="pick-basis-item ${basis.is_positive ? "is-positive" : "is-negative"}">
+                      <div class="pick-basis-main">
+                        <span class="pick-basis-label">${basis.label}</span>
+                        <span class="pick-basis-value">${basis.value_display}</span>
+                      </div>
+                      <span class="pick-basis-contrib">${basis.contribution_display}</span>
+                    </div>
+                  `
+                )
+                .join("")}
+            </div>
+          </div>`
+        : "";
+
+      const riskMarkup = riskTexts.length
+        ? `<div class="pick-detail-block">
+            <div class="pick-detail-title">模型提示</div>
+            <ul class="pick-detail-list pick-detail-list-risk">
+              ${riskTexts.map((text) => `<li>${text}</li>`).join("")}
+            </ul>
+          </div>`
+        : `<div class="pick-detail-block pick-detail-block-empty">
+            <div class="pick-detail-title">模型提示</div>
+            <div class="pick-detail-empty">当前未识别到明显拖累因子，整体因子结构偏正面。</div>
+          </div>`;
+
+      return `
+        <tr class="pick-main-row">
           <td>${item.symbol}</td>
           <td>${item.name}</td>
           <td>${formatNumber(item.close)}</td>
           <td>${formatSignedPercent(item.ret_5)}</td>
           <td>${formatSignedPercent(item.ret_10)}</td>
           <td>${formatSignedPercent(item.predicted_return_5)}</td>
+          <td>
+            <div class="pick-summary-cell">
+              <div class="pick-summary-text">${item.reason_summary || "综合因子占优"}</div>
+              <div class="pick-tags">${tagsMarkup}</div>
+            </div>
+          </td>
           <td><button class="mini-btn" data-action="view" data-symbol="${item.symbol}" data-name="${item.name || ""}" type="button">查看历史</button></td>
         </tr>
-      `
-    )
+        <tr class="pick-detail-row">
+          <td colspan="8">
+            <div class="pick-detail-card">
+              <div class="pick-detail-column pick-detail-column-main">
+                ${reasonsMarkup}
+              </div>
+              <div class="pick-detail-column pick-detail-column-side">
+                ${basisMarkup}
+                ${riskMarkup}
+              </div>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
     .join("");
 }
 
@@ -1327,6 +1451,84 @@ function renderMarketOverview(payload) {
   }
 }
 
+function renderHotNews(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const appendMode = Boolean(payload?._append);
+  state.hotNews = appendMode ? [...state.hotNews, ...items] : items;
+  state.hotNewsOffset = Number(payload?.next_offset || state.hotNews.length);
+  state.hotNewsTotal = Number(payload?.total || state.hotNews.length);
+  state.hotNewsHasMore = Boolean(payload?.has_more);
+  state.hotNewsCategory = payload?.category || "all";
+  if (payload?.available_categories && typeof payload.available_categories === "object") {
+    state.hotNewsAvailableCategories = payload.available_categories;
+  }
+  syncHotNewsFilterButton();
+
+  const metaParts = [];
+  if (payload?.source_label) {
+    metaParts.push(payload.source_label);
+  }
+  if (payload?.updated_at) {
+    metaParts.push(`更新 ${formatDateTime(payload.updated_at)}`);
+  }
+  metaParts.push(`筛选 ${getHotNewsCategoryLabel(payload?.category === "tech" ? "tech" : "all")}`);
+  const metaText = metaParts.join(" | ") || "暂无快报数据";
+
+  if (hotNewsPageMeta instanceof HTMLElement) {
+    hotNewsPageMeta.textContent = `${metaText} | 已加载 ${state.hotNews.length}/${state.hotNewsTotal || state.hotNews.length}`;
+  }
+
+  const renderListMarkup = (list, previewLimit = null) => {
+    if (!(list instanceof HTMLElement)) {
+      return;
+    }
+    const baseItems = appendMode ? state.hotNews : items;
+    const visibleItems = previewLimit ? baseItems.slice(0, previewLimit) : baseItems;
+    list.innerHTML = visibleItems.length
+      ? visibleItems
+          .map((item, index) => {
+            const tag = escapeHtml(item.tag || "快讯");
+            const title = escapeHtml(item.title || "市场热点快报");
+            const summary = escapeHtml(item.summary || item.title || "");
+            const publishedAt = escapeHtml(item.published_at || "-");
+            const source = escapeHtml(item.source || payload?.source_label || "快报");
+            const aiSummary = escapeHtml(item.ai_summary || "中性观察");
+            const aiTone = item.ai_tone === "positive" ? "news-positive" : item.ai_tone === "negative" ? "news-negative" : "news-neutral";
+            const href = item.url ? ` href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer"` : "";
+            const wrapperTag = item.url ? "a" : "div";
+            return `
+              <${wrapperTag} class="brief-item brief-item--neutral" data-index="${index}"${href}>
+                <div class="brief-side">
+                  <div class="brief-time">${publishedAt}</div>
+                  <div class="brief-ai ${aiTone}">AI总结：${aiSummary}</div>
+                </div>
+                <div class="brief-main">
+                  <div class="brief-title-row">
+                    <span class="brief-tag">${tag}</span>
+                    <span class="brief-source">${source}</span>
+                  </div>
+                  <div class="brief-title">${title}</div>
+                  <div class="brief-summary">${summary}</div>
+                </div>
+              </${wrapperTag}>
+            `;
+          })
+          .join("")
+      : `<div class="placeholder-row hot-news-empty">${state.hotNewsCategory === "tech" ? "暂无科技相关快报" : "暂无热点快报"}</div>`;
+  };
+  renderListMarkup(hotNewsList, null);
+
+  if (hotNewsLoadMoreHint instanceof HTMLElement) {
+    if (state.hotNewsLoading) {
+      hotNewsLoadMoreHint.textContent = `正在加载更多${getHotNewsCategoryLabel()}快报...`;
+    } else if (state.hotNewsHasMore) {
+      hotNewsLoadMoreHint.textContent = "向下滚动继续加载";
+    } else {
+      hotNewsLoadMoreHint.textContent = `已加载全部 ${state.hotNews.length} 条快报`;
+    }
+  }
+}
+
 function updateHistoryHeader() {
   if (!historyTitle || !historyBadge) {
     return;
@@ -1456,6 +1658,64 @@ async function loadMarketOverview() {
   renderMarketOverview(payload);
 }
 
+async function loadHotNews(forceRefresh = false, append = false) {
+  if (state.hotNewsLoading) {
+    return;
+  }
+  if (append && !state.hotNewsHasMore) {
+    return;
+  }
+  state.hotNewsLoading = true;
+  syncHotNewsFilterButton();
+  if (hotNewsLoadMoreHint instanceof HTMLElement) {
+    hotNewsLoadMoreHint.textContent =
+      append
+        ? `正在加载更多${getHotNewsCategoryLabel()}快报...`
+        : `正在加载${getHotNewsCategoryLabel()}快报...`;
+  }
+  try {
+    const offset = append ? state.hotNewsOffset : 0;
+    const params = new URLSearchParams({
+      limit: String(hotNewsPageSize),
+      offset: String(offset),
+    });
+    if (state.hotNewsCategory !== "all") {
+      params.set("category", state.hotNewsCategory);
+    }
+    if (forceRefresh) {
+      params.set("force_refresh", "true");
+    }
+    const payload = await fetchJson(`/api/hot-news?${params.toString()}`);
+    renderHotNews({ ...payload, _append: append });
+  } finally {
+    state.hotNewsLoading = false;
+    if (hotNewsLoadMoreHint instanceof HTMLElement) {
+      if (state.hotNewsHasMore) {
+        hotNewsLoadMoreHint.textContent = "向下滚动继续加载";
+      } else {
+        hotNewsLoadMoreHint.textContent = `已加载全部 ${state.hotNews.length} 条快报`;
+      }
+    }
+  }
+}
+
+async function selectHotNewsCategory(category) {
+  const nextCategory = category || "all";
+  if (state.hotNewsCategory === nextCategory && state.hotNews.length) {
+    return;
+  }
+  state.hotNewsCategory = nextCategory;
+  state.hotNews = [];
+  state.hotNewsOffset = 0;
+  state.hotNewsTotal = 0;
+  state.hotNewsHasMore = true;
+  syncHotNewsFilterButton();
+  if (hotNewsScroll instanceof HTMLElement) {
+    hotNewsScroll.scrollTop = 0;
+  }
+  await loadHotNews(false, false);
+}
+
 function startMarketPolling() {
   stopMarketPolling();
   state.marketPollTimer = window.setInterval(() => {
@@ -1521,6 +1781,7 @@ async function initializeDashboard() {
     loadFavorites(),
     loadHistory(state.currentHistorySymbol),
     loadMarketOverview(),
+    loadHotNews(),
     syncRefreshStatus(),
   ]);
 }
@@ -1561,6 +1822,13 @@ async function refreshRealData() {
 }
 
 function handleHistoryJump(symbol, name) {
+  if (searchResults instanceof HTMLElement) {
+    searchResults.innerHTML = "";
+  }
+  if (stockSearchInput instanceof HTMLInputElement) {
+    stockSearchInput.blur();
+  }
+  setStatus(`正在加载 ${symbol}${name ? ` ${name}` : ""} 的历史回看...`);
   loadHistory(symbol, state.selectedPeriod)
     .then(() => {
       setStatus(`已切换到 ${symbol}${name ? ` ${name}` : ""} 的历史回看。`);
@@ -1582,6 +1850,45 @@ watchBtn?.addEventListener("click", () => {
     .catch((error) => {
       setStatus(`盯盘快照刷新失败: ${error.message}`);
     });
+});
+
+hotNewsRefreshBtnPage?.addEventListener("click", () => {
+  state.hotNewsOffset = 0;
+  state.hotNewsHasMore = true;
+  loadHotNews(true, false)
+    .then(() => setStatus("热点快报已刷新。"))
+    .catch((error) => {
+      setStatus(`热点快报刷新失败: ${error.message}`);
+    });
+});
+
+hotNewsFilters?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const button = target.closest("[data-category]");
+  if (!(button instanceof HTMLElement) || !button.dataset.category) {
+    return;
+  }
+  selectHotNewsCategory(button.dataset.category)
+    .then(() => setStatus(`热点快报已切换到 ${getHotNewsCategoryLabel(button.dataset.category)}。`))
+    .catch((error) => {
+      setStatus(`热点快报分类筛选失败: ${error.message}`);
+    });
+});
+
+hotNewsScroll?.addEventListener("scroll", (event) => {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+  if (distanceToBottom < 160 && !state.hotNewsLoading && state.hotNewsHasMore) {
+    loadHotNews(false, true).catch((error) => {
+      setStatus(`热点快报继续加载失败: ${error.message}`);
+    });
+  }
 });
 
 trainBtn?.addEventListener("click", () => {
@@ -1683,13 +1990,7 @@ searchResults?.addEventListener("click", (event) => {
 
   const viewButton = target.closest("[data-action='view-search']");
   if (viewButton instanceof HTMLElement && viewButton.dataset.symbol) {
-    loadHistory(viewButton.dataset.symbol, state.selectedPeriod)
-      .then(() => {
-        setStatus(`已切换到 ${viewButton.dataset.symbol} 的历史回看。`);
-      })
-      .catch((error) => {
-        setStatus(`历史回看切换失败: ${error.message}`);
-      });
+    handleHistoryJump(viewButton.dataset.symbol, viewButton.dataset.name || "");
     return;
   }
 
@@ -1803,6 +2104,7 @@ window.addEventListener("resize", () => {
 });
 
 syncHistoryLayout();
+syncHotNewsFilterButton();
 startMarketPolling();
 
 initializeDashboard()
