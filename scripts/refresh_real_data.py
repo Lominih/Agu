@@ -12,7 +12,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.core.config import DEFAULT_MODEL_PATH, REAL_DATA_PATH, REFRESH_LOG_PATH  # noqa: E402
-from app.services.dataset import build_features, fetch_real_dataset, load_index_constituents  # noqa: E402
+from app.services.dataset import FEATURE_COLUMNS, build_features, fetch_real_dataset, load_index_constituents  # noqa: E402
+from app.services.model_state import write_model_meta  # noqa: E402
 from app.services.modeling import train_model  # noqa: E402
 from app.services.refresh_status import read_refresh_status, utc_now_iso, write_refresh_status  # noqa: E402
 
@@ -58,6 +59,13 @@ def main() -> int:
         )
         features = build_features(prices)
         metrics = train_model(features, DEFAULT_MODEL_PATH)
+        write_model_meta(
+            source="real",
+            pool=args.pool,
+            feature_columns=list(FEATURE_COLUMNS),
+            metrics={key: value for key, value in metrics.items() if key != "backtest"},
+            backtest=metrics.get("backtest"),
+        )
 
         write_refresh_status(
             {

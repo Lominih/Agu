@@ -5,12 +5,19 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
 STATUS_DIR = DATA_DIR / "status"
+CACHE_DIR = STATUS_DIR / "cache"
 
 DEFAULT_MODEL_PATH = MODELS_DIR / "stock_ranker.pkl"
 DEFAULT_DATA_PATH = DATA_DIR / "sample_prices.csv"
 REAL_DATA_PATH = DATA_DIR / "a_share_prices.csv"
 REFRESH_STATUS_PATH = STATUS_DIR / "refresh_status.json"
 REFRESH_LOG_PATH = STATUS_DIR / "refresh.log"
+MODEL_META_PATH = STATUS_DIR / "model_meta.json"
+MARKET_OVERVIEW_CACHE_PATH = STATUS_DIR / "market_overview_cache.json"
+HOT_NEWS_CACHE_PATH = STATUS_DIR / "hot_news_cache.json"
+STOCK_CATALOG_CACHE_PATH = STATUS_DIR / "stock_catalog_cache.json"
+HISTORY_CACHE_DIR = CACHE_DIR / "history"
+PAPER_PORTFOLIO_PATH = DATA_DIR / "paper_portfolio.json"
 
 DEFAULT_SAMPLE_SYMBOLS: list[tuple[str, str]] = [
     ("600519", "贵州茅台"),

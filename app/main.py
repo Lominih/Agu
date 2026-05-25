@@ -10,38 +10,27 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.core.config import (
-    BASE_DIR,
-    DEFAULT_DATA_PATH,
-    DEFAULT_MODEL_PATH,
-    REAL_DATA_PATH,
-    REFRESH_LOG_PATH,
-)
-from app.services.dataset import (
-    FEATURE_COLUMNS,
-    build_features,
-    build_scoring_frame,
-    latest_snapshot,
-    load_price_data,
-)
+from app.core.config import BASE_DIR, DEFAULT_DATA_PATH, DEFAULT_MODEL_PATH, REAL_DATA_PATH, REFRESH_LOG_PATH
+from app.services.dataset import FEATURE_COLUMNS, build_features, build_scoring_frame, latest_snapshot, load_price_data
+from app.services.hot_news import get_hot_news
+from app.services.market_overview import get_market_overview
 from app.services.market_watch import (
     add_custom_watchlist_item,
     build_history_payload,
+    build_watch_snapshot,
     delete_custom_watchlist_item,
     get_custom_watchlist_snapshot,
     get_intraday_change_history,
     get_watchlist_history,
-    list_custom_watchlist,
-    merge_live_and_close,
     search_symbols,
 )
-from app.services.hot_news import get_hot_news
-from app.services.market_overview import get_market_overview
+from app.services.model_state import read_model_meta, write_model_meta
 from app.services.modeling import build_pick_explanations, load_model, score_snapshot, train_model
+from app.services.paper_portfolio import get_portfolio_snapshot, place_order, reset_portfolio
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
 
-app = FastAPI(title="A股选股模型", version="0.4.0")
+app = FastAPI(title="A股选股本地实验室", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -66,6 +55,19 @@ def resolve_state_source(source: str) -> str:
     return "sample"
 
 
+def persist_model_meta(source: str, prices, metrics: dict | None) -> dict | None:
+    if not metrics:
+        return read_model_meta()
+    pool = str(prices["pool"].iloc[0]) if "pool" in prices.columns and not prices.empty else "sample"
+    return write_model_meta(
+        source=source,
+        pool=pool,
+        feature_columns=list(FEATURE_COLUMNS),
+        metrics={key: value for key, value in metrics.items() if key != "backtest"},
+        backtest=metrics.get("backtest"),
+    )
+
+
 def ensure_model(source: str = "real") -> dict:
     state_source = resolve_state_source(source)
     data_source, data_path = get_data_path(state_source)
@@ -75,14 +77,36 @@ def ensure_model(source: str = "real") -> dict:
 
     trained = False
     metrics: dict | None = None
-    if not DEFAULT_MODEL_PATH.exists():
-        metrics = train_model(train_features, DEFAULT_MODEL_PATH)
-        trained = True
-
-    model = load_model(DEFAULT_MODEL_PATH)
     snapshot = latest_snapshot(scoring_frame)
-    ranked = score_snapshot(model, snapshot)
+    model_meta = read_model_meta()
+
+    def retrain_current_model() -> tuple[dict | None, Any]:
+        fresh_metrics = train_model(train_features, DEFAULT_MODEL_PATH)
+        persist_model_meta(data_source, prices, fresh_metrics)
+        return fresh_metrics, load_model(DEFAULT_MODEL_PATH)
+
+    if not DEFAULT_MODEL_PATH.exists():
+        metrics, model = retrain_current_model()
+        trained = True
+    else:
+        try:
+            model = load_model(DEFAULT_MODEL_PATH)
+            ranked_probe = score_snapshot(model, snapshot)
+            if not model_meta.get("updated_at"):
+                metrics, model = retrain_current_model()
+                trained = True
+                ranked = score_snapshot(model, snapshot)
+            else:
+                ranked = ranked_probe
+        except Exception:
+            metrics, model = retrain_current_model()
+            trained = True
+            ranked = score_snapshot(model, snapshot)
+
+    if "ranked" not in locals():
+        ranked = score_snapshot(model, snapshot)
     ranked = build_pick_explanations(model, ranked)
+    model_meta = read_model_meta()
 
     return {
         "trained": trained,
@@ -92,6 +116,7 @@ def ensure_model(source: str = "real") -> dict:
         "scoring_frame": scoring_frame,
         "ranked": ranked,
         "source": data_source,
+        "model_meta": model_meta,
     }
 
 
@@ -118,6 +143,19 @@ class FavoritePayload(BaseModel):
     kind: str = "stock"
 
 
+class OrderPayload(BaseModel):
+    symbol: str
+    side: str
+    quantity: int
+    price: float | None = None
+    price_mode: str | None = "live"
+    name: str | None = None
+
+
+class PortfolioResetPayload(BaseModel):
+    initial_cash: float | None = None
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(frontend_dir / "index.html")
@@ -134,10 +172,9 @@ def overview(source: str = "real") -> dict:
     prices = state["prices"]
     train_features = state["train_features"]
     ranked = state["ranked"]
-
     latest_date = ranked["date"].max().strftime("%Y-%m-%d")
     top_pick = ranked.iloc[0]
-
+    model_meta = state.get("model_meta") or {}
     return {
         "latest_date": latest_date,
         "universe_size": int(prices["symbol"].nunique()),
@@ -152,6 +189,7 @@ def overview(source: str = "real") -> dict:
         },
         "trained_now": state["trained"],
         "training_metrics": state["metrics"],
+        "model_meta": model_meta,
     }
 
 
@@ -185,6 +223,7 @@ def picks(limit: int = 8, source: str = "real") -> dict:
                 "close": round(float(row["close"]), 2),
                 "ret_5": round(float(row["ret_5"]) * 100, 2),
                 "ret_10": round(float(row["ret_10"]) * 100, 2),
+                "ret_20": round(float(row["ret_20"]) * 100, 2),
                 "predicted_return_5": round(float(row["predicted_return_5"]) * 100, 2),
                 "reason_summary": row.get("reason_summary"),
                 "reason_tags": row.get("reason_tags") or [],
@@ -193,14 +232,14 @@ def picks(limit: int = 8, source: str = "real") -> dict:
                 "risk_texts": row.get("risk_texts") or [],
             }
         )
-    return {"items": records, "source": state["source"]}
+    return {"items": records, "source": state["source"], "model_meta": state.get("model_meta")}
 
 
 @app.get("/api/watchlist")
 def watchlist(limit: int = 8, source: str = "real") -> dict:
     symbols = get_watch_symbols(limit=limit, source=source)
-    items = merge_live_and_close(symbols)
-    return {"items": items, "source": source}
+    snapshot = build_watch_snapshot(symbols)
+    return {**snapshot, "source": source}
 
 
 @app.get("/api/watch-history/{symbol}")
@@ -243,28 +282,47 @@ def search(query: str, limit: int = 12) -> dict:
 @app.get("/api/favorites")
 def favorites() -> dict:
     payload = get_custom_watchlist_snapshot()
-    return {"items": payload["items"], "updated_at": payload.get("updated_at")}
+    return {"items": payload["items"], "updated_at": payload.get("updated_at"), "meta": payload.get("meta")}
 
 
 @app.post("/api/favorites")
-def add_favorite(
-    payload: FavoritePayload | None = Body(default=None),
-    symbol: str | None = None,
-    name: str | None = None,
-    kind: str = "stock",
-) -> dict:
+def add_favorite(payload: FavoritePayload | None = Body(default=None), symbol: str | None = None, name: str | None = None, kind: str = "stock") -> dict:
     target_symbol = payload.symbol if payload else symbol
     if not target_symbol:
         raise HTTPException(status_code=400, detail="symbol is required")
     target_name = payload.name if payload else name
     target_kind = payload.kind if payload else kind
-    result = add_custom_watchlist_item(symbol=target_symbol, name=target_name, kind=target_kind)
-    return result
+    return add_custom_watchlist_item(symbol=target_symbol, name=target_name, kind=target_kind)
 
 
 @app.delete("/api/favorites/{symbol}")
 def delete_favorite(symbol: str, kind: str | None = None) -> dict:
     return delete_custom_watchlist_item(symbol=symbol, kind=kind)
+
+
+@app.get("/api/portfolio")
+def portfolio() -> dict:
+    return get_portfolio_snapshot()
+
+
+@app.post("/api/portfolio/orders")
+def portfolio_order(payload: OrderPayload) -> dict:
+    try:
+        return place_order(
+            symbol=payload.symbol,
+            side=payload.side,
+            quantity=payload.quantity,
+            price=payload.price,
+            price_mode=payload.price_mode,
+            name=payload.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/portfolio/reset")
+def portfolio_reset(payload: PortfolioResetPayload | None = Body(default=None)) -> dict:
+    return reset_portfolio(initial_cash=payload.initial_cash if payload else None)
 
 
 @app.post("/api/train")
@@ -274,7 +332,8 @@ def retrain(source: str = "real") -> dict:
     prices = load_price_data(data_path, source=data_source, allow_remote_fetch=False)
     features = build_features(prices)
     metrics = train_model(features, DEFAULT_MODEL_PATH)
-    return {"message": "模型已重新训练", "metrics": metrics, "source": data_source}
+    model_meta = persist_model_meta(data_source, prices, metrics)
+    return {"message": "模型已重新训练", "metrics": metrics, "source": data_source, "model_meta": model_meta}
 
 
 @app.get("/api/refresh-real-data/status")
@@ -286,15 +345,11 @@ def refresh_real_data_status() -> dict:
 def refresh_real_data(pool: str = "hs300") -> dict:
     status = get_runtime_refresh_status()
     if status["state"] == "running":
-        return {
-            "message": "已有真实数据刷新任务在运行",
-            "status": status,
-        }
+        return {"message": "已有真实数据刷新任务在运行", "status": status}
 
     python_executable = get_python_executable()
     script_path = get_refresh_script()
     REFRESH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-
     with REFRESH_LOG_PATH.open("w", encoding="utf-8") as log_file:
         process = subprocess.Popen(
             [python_executable, str(script_path), "--pool", pool],
@@ -319,8 +374,4 @@ def refresh_real_data(pool: str = "hs300") -> dict:
             "log_path": str(REFRESH_LOG_PATH),
         }
     )
-
-    return {
-        "message": "真实数据刷新任务已在后台启动",
-        "status": status,
-    }
+    return {"message": "真实数据刷新任务已在后台启动", "status": status}

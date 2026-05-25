@@ -14,10 +14,16 @@ from app.core.config import DEFAULT_SAMPLE_SYMBOLS, INDEX_POOLS
 FEATURE_COLUMNS = [
     "ret_5",
     "ret_10",
+    "ret_20",
     "volatility_10",
+    "volatility_20",
     "price_vs_ma10",
     "price_vs_ma20",
+    "ma_gap_10_20",
     "volume_ratio_5",
+    "volume_ratio_20",
+    "drawdown_20",
+    "momentum_spread_5_20",
 ]
 
 CSI_CONS_COLUMNS = {
@@ -158,41 +164,42 @@ def load_price_data(
     return df
 
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
+def _apply_factor_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     working = df.copy().sort_values(["symbol", "date"]).reset_index(drop=True)
     grouped = working.groupby("symbol", group_keys=False)
+    close_returns = grouped["close"].pct_change()
 
     working["ret_5"] = grouped["close"].pct_change(5)
     working["ret_10"] = grouped["close"].pct_change(10)
-    working["volatility_10"] = grouped["close"].pct_change().rolling(10).std().reset_index(level=0, drop=True)
+    working["ret_20"] = grouped["close"].pct_change(20)
+    working["volatility_10"] = close_returns.rolling(10).std().reset_index(level=0, drop=True)
+    working["volatility_20"] = close_returns.rolling(20).std().reset_index(level=0, drop=True)
     working["ma_10"] = grouped["close"].rolling(10).mean().reset_index(level=0, drop=True)
     working["ma_20"] = grouped["close"].rolling(20).mean().reset_index(level=0, drop=True)
     working["volume_ma_5"] = grouped["volume"].rolling(5).mean().reset_index(level=0, drop=True)
+    working["volume_ma_20"] = grouped["volume"].rolling(20).mean().reset_index(level=0, drop=True)
+    working["rolling_peak_20"] = grouped["close"].rolling(20).max().reset_index(level=0, drop=True)
 
     working["price_vs_ma10"] = working["close"] / working["ma_10"] - 1
     working["price_vs_ma20"] = working["close"] / working["ma_20"] - 1
     working["volume_ratio_5"] = working["volume"] / working["volume_ma_5"]
+    working["ma_gap_10_20"] = working["ma_10"] / working["ma_20"] - 1
+    working["volume_ratio_20"] = working["volume"] / working["volume_ma_20"]
+    working["drawdown_20"] = working["close"] / working["rolling_peak_20"] - 1
+    working["momentum_spread_5_20"] = working["ret_5"] - working["ret_20"]
+    return working
 
+
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    working = _apply_factor_pipeline(df)
+    grouped = working.groupby("symbol", group_keys=False)
     working["future_return_5"] = grouped["close"].shift(-5) / working["close"] - 1
     working = working.dropna(subset=FEATURE_COLUMNS + ["future_return_5"]).reset_index(drop=True)
     return working
 
 
 def build_scoring_frame(df: pd.DataFrame) -> pd.DataFrame:
-    working = df.copy().sort_values(["symbol", "date"]).reset_index(drop=True)
-    grouped = working.groupby("symbol", group_keys=False)
-
-    working["ret_5"] = grouped["close"].pct_change(5)
-    working["ret_10"] = grouped["close"].pct_change(10)
-    working["volatility_10"] = grouped["close"].pct_change().rolling(10).std().reset_index(level=0, drop=True)
-    working["ma_10"] = grouped["close"].rolling(10).mean().reset_index(level=0, drop=True)
-    working["ma_20"] = grouped["close"].rolling(20).mean().reset_index(level=0, drop=True)
-    working["volume_ma_5"] = grouped["volume"].rolling(5).mean().reset_index(level=0, drop=True)
-
-    working["price_vs_ma10"] = working["close"] / working["ma_10"] - 1
-    working["price_vs_ma20"] = working["close"] / working["ma_20"] - 1
-    working["volume_ratio_5"] = working["volume"] / working["volume_ma_5"]
-
+    working = _apply_factor_pipeline(df)
     working = working.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
     return working
 

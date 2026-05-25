@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>A-Share Local Lab</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260525m" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260526a" />
   </head>
   <body>
     <main class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-brand">
           <p class="eyebrow">A-Share Local Lab</p>
-          <h1>A股 AI 选股与盯盘</h1>
+          <h1>A股 AI 选股与本地模拟盘</h1>
           <p class="sidebar-copy">
-            左侧切换候选股、实时盯盘和自选股票，右侧固定历史回看。未选择个股时，默认展示上证指数。
+            左侧切换候选股、实时盯盘、自选与模拟盘，右侧固定历史回看。未选择个股时默认展示上证指数。
           </p>
         </div>
 
@@ -22,6 +22,7 @@
           <button class="nav-item" data-page="picks" type="button">模型候选股</button>
           <button class="nav-item" data-page="watch" type="button">实时盯盘</button>
           <button class="nav-item" data-page="watchlist" type="button">自选股票</button>
+          <button class="nav-item" data-page="portfolio" type="button">模拟盘</button>
           <button class="nav-item" data-page="hot" type="button">热点快报</button>
         </nav>
 
@@ -33,9 +34,10 @@
             </div>
             <div id="marketUpdatedAt" class="sidebar-market-updated">加载中...</div>
           </div>
+          <div id="marketWarnings" class="meta-strip meta-strip-sidebar">等待行情数据...</div>
 
           <div class="market-nasdaq" id="marketNasdaqCard">
-            <div class="market-mini-label">上个交易日纳指</div>
+            <div class="market-mini-label">美股上个交易日纳指</div>
             <div class="market-nasdaq-row">
               <strong id="marketNasdaqPct">-</strong>
               <span id="marketNasdaqMeta">-</span>
@@ -79,12 +81,12 @@
               </div>
             </div>
           </div>
-
         </section>
 
         <div class="sidebar-footer">
           <div class="sidebar-chip">本地运行</div>
           <div class="sidebar-chip">固定回看</div>
+          <div class="sidebar-chip">纸交易</div>
         </div>
       </aside>
 
@@ -94,9 +96,9 @@
             <section class="hero hero-home">
               <div class="hero-copy">
                 <p class="eyebrow">A-Share Local Lab</p>
-                <h2>A股 AI 选股与盯盘</h2>
+                <h2>A股 AI 选股、盯盘与本地模拟盘</h2>
                 <p class="subtitle">
-                  左侧看候选股和盯盘列表，右上角固定单股历史回看。未选择个股时，默认展示上证指数，更接近看盘软件的工作台体验。
+                  这一版工作台强化了数据回退、搜索一致性、模型评估和本地模拟交易。候选股、盯盘、自选与历史回看共用一套状态提示。
                 </p>
               </div>
 
@@ -109,12 +111,13 @@
             </section>
 
             <section class="cards home-cards" id="overviewCards"></section>
+            <section class="metric-grid" id="modelMetricsCards"></section>
 
             <section class="panel home-sector-panel">
               <div class="panel-head">
                 <div>
                   <h3>美股上一交易日领涨行业</h3>
-                  <p>按同花顺美股涨幅榜与公司概况页所属行业聚合，展示上一交易日行业强弱</p>
+                  <p>按同花顺美股涨幅榜与公司概况页的所属行业聚合展示，支持失败后回退到最近成功缓存。</p>
                 </div>
               </div>
               <div id="homeUsLeaderList" class="market-sector-grid"></div>
@@ -139,7 +142,7 @@
               <div class="panel-head">
                 <div>
                   <h3>运行状态</h3>
-                  <p>动作、训练与刷新日志会在这里即时显示</p>
+                  <p>训练、刷新、搜索和图表切换的提示会显示在这里。</p>
                 </div>
               </div>
               <pre id="statusBox">等待加载...</pre>
@@ -153,7 +156,7 @@
                   <h3>模型候选股</h3>
                   <p id="latestDate">加载中...</p>
                 </div>
-                <p>模型按未来 5 日预测收益排序，可直接切到右侧历史回看。</p>
+                <p>本页显示模型预测未来 5 日更强的候选股，并展开推荐原因、预测依据与风险提示。</p>
               </div>
 
               <div class="table-wrap table-scroll">
@@ -163,9 +166,10 @@
                       <th>代码</th>
                       <th>名称</th>
                       <th>收盘价</th>
-                      <th>5日收益</th>
-                      <th>10日收益</th>
-                      <th>预测未来5日</th>
+                      <th>5日</th>
+                      <th>10日</th>
+                      <th>20日</th>
+                      <th>预测5日</th>
                       <th>推荐摘要</th>
                       <th>操作</th>
                     </tr>
@@ -183,7 +187,7 @@
                   <h3>实时盯盘</h3>
                   <p id="watchSource">盯盘快照加载中...</p>
                 </div>
-                <p>交易时段优先显示实时快照，非交易时段回看最近收盘数据。</p>
+                <p>优先显示实时快照；若实时失败，会自动回退到最近收盘价，并在状态中明确标记。</p>
               </div>
 
               <div class="table-wrap table-scroll">
@@ -212,15 +216,15 @@
               <div class="panel-head">
                 <div>
                   <h3>自选股票</h3>
-                  <p id="watchlistSummary">本地保存搜索添加的股票，支持实时快照、删除和切到右侧历史回看。</p>
+                  <p id="watchlistSummary">本地保存搜索添加的股票，支持实时快照与切到右侧历史回看。</p>
                 </div>
                 <div class="watchlist-head-actions"></div>
               </div>
 
               <div class="watchlist-shell">
                 <div class="watchlist-toolbar">
-                  <div class="watchlist-pill">自选股池</div>
-                  <div class="watchlist-pill watchlist-pill-muted">本地持久化，不依赖外部账户</div>
+                  <div class="watchlist-pill">本地自选池</div>
+                  <div class="watchlist-pill watchlist-pill-muted">不依赖外部账户，重启后仍可保留</div>
                 </div>
 
                 <div class="table-wrap table-scroll">
@@ -242,6 +246,115 @@
                   </table>
                 </div>
               </div>
+            </section>
+          </section>
+
+          <section class="page" data-page="portfolio">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>模拟盘 / 纸交易</h3>
+                  <p>本地记录现金、持仓和成交，不连券商，不动真钱；估值优先使用实时快照，失败时回退到最近收盘。</p>
+                </div>
+                <button id="portfolioResetBtn" class="secondary" type="button">重置模拟盘</button>
+              </div>
+
+              <div class="cards" id="portfolioSummaryCards"></div>
+
+              <div class="portfolio-grid">
+                <section class="portfolio-panel">
+                  <div class="subpanel-head">
+                    <h4>下单</h4>
+                    <p>支持实时成交、收盘成交或手工价格。A 股默认按 100 股整数倍下单。</p>
+                  </div>
+                  <form id="portfolioForm" class="portfolio-form">
+                    <div class="form-grid">
+                      <label>
+                        <span>股票代码</span>
+                        <input id="portfolioSymbol" type="text" placeholder="如 600519" />
+                      </label>
+                      <label>
+                        <span>股票名称</span>
+                        <input id="portfolioName" type="text" placeholder="可选，便于记录" />
+                      </label>
+                      <label>
+                        <span>买卖方向</span>
+                        <select id="portfolioSide">
+                          <option value="buy">买入</option>
+                          <option value="sell">卖出</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>数量</span>
+                        <input id="portfolioQty" type="number" min="100" step="100" value="100" />
+                      </label>
+                      <label>
+                        <span>价格模式</span>
+                        <select id="portfolioPriceMode">
+                          <option value="live">实时价</option>
+                          <option value="close">收盘价</option>
+                          <option value="manual">手工价</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>手工价格</span>
+                        <input id="portfolioPrice" type="number" min="0" step="0.01" placeholder="仅手工价时填写" />
+                      </label>
+                    </div>
+                    <div class="portfolio-form-actions">
+                      <button class="primary" type="submit">提交模拟单</button>
+                    </div>
+                  </form>
+                </section>
+
+                <section class="portfolio-panel portfolio-panel-fill">
+                  <div class="subpanel-head">
+                    <h4>持仓</h4>
+                    <p id="portfolioMeta">等待持仓快照...</p>
+                  </div>
+                  <div class="table-wrap table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>代码</th>
+                          <th>名称</th>
+                          <th>数量</th>
+                          <th>成本</th>
+                          <th>现价</th>
+                          <th>市值</th>
+                          <th>浮盈亏</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody id="portfolioPositionsTable"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+
+              <section class="portfolio-panel portfolio-panel-fill">
+                <div class="subpanel-head">
+                  <h4>最近成交</h4>
+                  <p>显示最近 20 笔本地模拟单成交记录。</p>
+                </div>
+                <div class="table-wrap table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>时间</th>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>方向</th>
+                        <th>数量</th>
+                        <th>价格</th>
+                        <th>费用</th>
+                        <th>已实现盈亏</th>
+                      </tr>
+                    </thead>
+                    <tbody id="portfolioTradesTable"></tbody>
+                  </table>
+                </div>
+              </section>
             </section>
           </section>
 
@@ -270,20 +383,22 @@
             <div class="panel-head history-head">
               <div>
                 <h3>历史回看</h3>
-                <p id="historyTitle">默认显示上证指数，点击左侧“查看历史”切换个股。</p>
+                <p id="historyTitle">默认显示上证指数，点击左侧任一“查看”即可切到单股历史回看。</p>
               </div>
               <div class="history-head-actions">
-                <button id="historyBackBtn" class="history-mode-btn" type="button" hidden>返回K线</button>
+                <button id="historyBackBtn" class="history-mode-btn" type="button" hidden>返回 K 线</button>
                 <button id="historyExpandBtn" class="history-mode-btn history-expand-btn" type="button" aria-pressed="false">大图模式</button>
                 <div class="history-badge" id="historyBadge">上证指数</div>
               </div>
             </div>
 
+            <div id="historyMeta" class="meta-strip">等待历史数据...</div>
+
             <div class="search-box">
               <input
                 id="stockSearchInput"
                 type="text"
-                placeholder="搜索股票代码或名称，例如 600519 / 茅台"
+                placeholder="搜索股票代码或名称，如 600519 / 茅台"
                 autocomplete="off"
               />
               <div id="searchResults" class="search-results search-results-rich"></div>
@@ -342,6 +457,6 @@
       </section>
     </main>
 
-    <script src="/assets/app.js?v=20260525m"></script>
+    <script src="/assets/app.js?v=20260526a"></script>
   </body>
 </html>
