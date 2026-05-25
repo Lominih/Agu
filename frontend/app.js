@@ -8,6 +8,7 @@ const historyTitle = document.querySelector("#historyTitle");
 const historyChart = document.querySelector("#historyChart");
 const historyBadge = document.querySelector("#historyBadge");
 const historyBackBtn = document.querySelector("#historyBackBtn");
+const historyExpandBtn = document.querySelector("#historyExpandBtn");
 const historyTooltip = document.querySelector("#historyTooltip");
 const stockSearchInput = document.querySelector("#stockSearchInput");
 const searchResults = document.querySelector("#searchResults");
@@ -21,6 +22,21 @@ const watchBtn = document.querySelector("#watchBtn");
 const taskState = document.querySelector("#taskState");
 const lastRefreshAt = document.querySelector("#lastRefreshAt");
 const lastRefreshResult = document.querySelector("#lastRefreshResult");
+const marketUpdatedAt = document.querySelector("#marketUpdatedAt");
+const marketNasdaqCard = document.querySelector("#marketNasdaqCard");
+const marketNasdaqPct = document.querySelector("#marketNasdaqPct");
+const marketNasdaqMeta = document.querySelector("#marketNasdaqMeta");
+const marketShanghaiDate = document.querySelector("#marketShanghaiDate");
+const marketOpen = document.querySelector("#marketOpen");
+const marketCurrent = document.querySelector("#marketCurrent");
+const marketChange = document.querySelector("#marketChange");
+const marketChangePct = document.querySelector("#marketChangePct");
+const homeUsLeaderList = document.querySelector("#homeUsLeaderList");
+const marketChart = document.querySelector("#marketChart");
+const marketTooltip = document.querySelector("#marketTooltip");
+const marketZoomInBtn = document.querySelector("#marketZoomInBtn");
+const marketZoomOutBtn = document.querySelector("#marketZoomOutBtn");
+const marketZoomResetBtn = document.querySelector("#marketZoomResetBtn");
 const navItems = document.querySelectorAll(".nav-item");
 const pages = document.querySelectorAll(".page");
 const historyPeriodTabs = document.querySelector("#historyPeriodTabs");
@@ -63,6 +79,7 @@ const periodLabelMap = {
 
 const state = {
   refreshPollTimer: null,
+  marketPollTimer: null,
   searchTimer: null,
   picks: [],
   watch: [],
@@ -78,6 +95,12 @@ const state = {
   chartViewport: { start: 0, end: 0 },
   chartGeometry: null,
   chartHoverIndex: null,
+  historyExpanded: false,
+  marketOverview: null,
+  marketChartItems: [],
+  marketChartViewport: { start: 0, end: 0 },
+  marketChartGeometry: null,
+  marketChartHoverIndex: null,
 };
 
 function setStatus(message) {
@@ -94,6 +117,28 @@ function switchPage(pageName) {
   pages.forEach((page) => {
     page.classList.toggle("active", page.dataset.page === pageName);
   });
+}
+
+function syncHistoryLayout() {
+  document.body.classList.toggle("history-expanded", state.historyExpanded);
+  if (historyExpandBtn instanceof HTMLButtonElement) {
+    historyExpandBtn.classList.toggle("is-active", state.historyExpanded);
+    historyExpandBtn.setAttribute("aria-pressed", state.historyExpanded ? "true" : "false");
+    historyExpandBtn.textContent = state.historyExpanded ? "退出大图" : "大图模式";
+  }
+}
+
+function setHistoryExpanded(expanded) {
+  state.historyExpanded = Boolean(expanded);
+  syncHistoryLayout();
+  window.setTimeout(() => {
+    drawCurrentChart();
+  }, 30);
+}
+
+function toggleHistoryExpanded() {
+  setHistoryExpanded(!state.historyExpanded);
+  setStatus(state.historyExpanded ? "右侧趋势图已切换到大图模式。" : "已退出大图模式，恢复常规工作台布局。");
 }
 
 function formatDateTime(value) {
@@ -133,6 +178,19 @@ function getToneClass(changePct) {
     return "quote-down";
   }
   return "quote-flat";
+}
+
+function getToneClassName(changePct) {
+  if (changePct == null || Number.isNaN(Number(changePct))) {
+    return "market-flat";
+  }
+  if (Number(changePct) > 0) {
+    return "market-up";
+  }
+  if (Number(changePct) < 0) {
+    return "market-down";
+  }
+  return "market-flat";
 }
 
 async function fetchJson(url, options) {
@@ -184,6 +242,13 @@ function stopRefreshPolling() {
   if (state.refreshPollTimer) {
     window.clearInterval(state.refreshPollTimer);
     state.refreshPollTimer = null;
+  }
+}
+
+function stopMarketPolling() {
+  if (state.marketPollTimer) {
+    window.clearInterval(state.marketPollTimer);
+    state.marketPollTimer = null;
   }
 }
 
@@ -431,6 +496,14 @@ function resetChartViewport() {
   state.chartHoverIndex = null;
 }
 
+function resetMarketChartViewport() {
+  const total = state.marketChartItems.length;
+  const visible = Math.min(total, 180);
+  state.marketChartViewport.end = total;
+  state.marketChartViewport.start = Math.max(0, total - visible);
+  state.marketChartHoverIndex = null;
+}
+
 function getVisibleChartItems() {
   return state.chartItems.slice(state.chartViewport.start, state.chartViewport.end);
 }
@@ -445,6 +518,18 @@ function ensureChartViewport() {
   }
   state.chartViewport.start = start;
   state.chartViewport.end = end;
+}
+
+function ensureMarketChartViewport() {
+  const total = state.marketChartItems.length;
+  let start = Math.max(0, Math.min(state.marketChartViewport.start, total));
+  let end = Math.max(start, Math.min(state.marketChartViewport.end, total));
+  if (end === start && total > 0) {
+    start = 0;
+    end = total;
+  }
+  state.marketChartViewport.start = start;
+  state.marketChartViewport.end = end;
 }
 
 function zoomChart(factor, anchorRatio = 0.8) {
@@ -464,6 +549,22 @@ function zoomChart(factor, anchorRatio = 0.8) {
   drawCurrentChart();
 }
 
+function zoomMarketChart(factor, anchorRatio = 0.8) {
+  const total = state.marketChartItems.length;
+  if (total <= 8) {
+    return;
+  }
+
+  const currentSize = state.marketChartViewport.end - state.marketChartViewport.start;
+  const nextSize = Math.max(20, Math.min(total, Math.round(currentSize * factor)));
+  const anchorIndex = state.marketChartViewport.start + Math.round(currentSize * anchorRatio);
+  let nextStart = Math.round(anchorIndex - nextSize * anchorRatio);
+  nextStart = Math.max(0, Math.min(nextStart, total - nextSize));
+  state.marketChartViewport.start = nextStart;
+  state.marketChartViewport.end = nextStart + nextSize;
+  drawMarketChart();
+}
+
 function applyMouseWheelZoom(event) {
   if (!state.chartItems.length || !state.chartGeometry) {
     return;
@@ -476,6 +577,21 @@ function applyMouseWheelZoom(event) {
   const plotWidth = state.chartGeometry.plotWidth;
   const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - plotLeft) / Math.max(plotWidth, 1)));
   zoomChart(event.deltaY < 0 ? 0.85 : 1.18, ratio);
+}
+
+function applyMarketMouseWheelZoom(event) {
+  if (!state.marketChartItems.length || !state.marketChartGeometry || !(marketChart instanceof HTMLCanvasElement)) {
+    return;
+  }
+
+  event.preventDefault();
+  const rect = marketChart.getBoundingClientRect();
+  const margin = state.marketChartGeometry.margin;
+  const ratio = Math.max(
+    0,
+    Math.min(1, (event.clientX - rect.left - margin.left) / Math.max(state.marketChartGeometry.plotWidth, 1))
+  );
+  zoomMarketChart(event.deltaY < 0 ? 0.85 : 1.18, ratio);
 }
 
 function setupCanvas() {
@@ -498,6 +614,26 @@ function setupCanvas() {
   return { ctx, width, height };
 }
 
+function setupMarketCanvas() {
+  if (!(marketChart instanceof HTMLCanvasElement)) {
+    return null;
+  }
+  const ctx = marketChart.getContext("2d");
+  if (!ctx) {
+    return null;
+  }
+  const dpr = window.devicePixelRatio || 1;
+  const width = marketChart.clientWidth || marketChart.width;
+  const height = marketChart.clientHeight || marketChart.height;
+  marketChart.width = Math.floor(width * dpr);
+  marketChart.height = Math.floor(height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#09111a";
+  ctx.fillRect(0, 0, width, height);
+  return { ctx, width, height };
+}
+
 function drawEmptyChart(text) {
   const setup = setupCanvas();
   if (!setup) {
@@ -510,6 +646,18 @@ function drawEmptyChart(text) {
   hideHistoryTooltip();
 }
 
+function drawEmptyMarketChart(text) {
+  const setup = setupMarketCanvas();
+  if (!setup) {
+    return;
+  }
+  setup.ctx.fillStyle = "#8ea0b8";
+  setup.ctx.font = "12px Segoe UI";
+  setup.ctx.fillText(text, 16, 26);
+  state.marketChartGeometry = null;
+  hideMarketTooltip();
+}
+
 function drawCurrentChart() {
   ensureChartViewport();
   if (!state.chartItems.length) {
@@ -520,6 +668,103 @@ function drawCurrentChart() {
     drawIntradayLineChart();
   } else {
     drawCandlesChart();
+  }
+}
+
+function drawMarketChart() {
+  ensureMarketChartViewport();
+  const setup = setupMarketCanvas();
+  if (!setup) {
+    return;
+  }
+
+  const items = state.marketChartItems.slice(state.marketChartViewport.start, state.marketChartViewport.end);
+  if (!items.length) {
+    drawEmptyMarketChart("暂无上证分时数据");
+    return;
+  }
+
+  const { ctx, width, height } = setup;
+  const margin = { top: 14, right: 12, bottom: 24, left: 44 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const values = items.map((item) => Number(item.change_pct ?? 0));
+  const minValue = Math.min(...values, 0);
+  const maxValue = Math.max(...values, 0);
+  const range = Math.max(maxValue - minValue, 0.16);
+  const stepX = items.length > 1 ? plotWidth / (items.length - 1) : plotWidth;
+  const xForIndex = (index) => margin.left + stepX * index;
+  const valueToY = (value) => margin.top + ((maxValue - value) / range) * plotHeight;
+
+  drawGrid(ctx, margin, plotWidth, plotHeight, 4);
+  const zeroY = valueToY(0);
+  ctx.strokeStyle = "rgba(126, 231, 247, 0.25)";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, zeroY);
+  ctx.lineTo(margin.left + plotWidth, zeroY);
+  ctx.stroke();
+
+  ctx.fillStyle = "#8ea0b8";
+  ctx.font = "11px Segoe UI";
+  for (let row = 0; row <= 4; row += 1) {
+    const value = maxValue - (range / 4) * row;
+    const y = margin.top + (plotHeight / 4) * row;
+    ctx.fillText(formatSignedPercent(value), 4, y + 4);
+  }
+
+  ctx.strokeStyle = values[values.length - 1] >= 0 ? "#ff6b66" : "#2dd36f";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  items.forEach((item, index) => {
+    const x = xForIndex(index);
+    const y = valueToY(Number(item.change_pct ?? 0));
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
+  const latestIndex = items.length - 1;
+  ctx.fillStyle = values[latestIndex] >= 0 ? "#ff6b66" : "#2dd36f";
+  ctx.beginPath();
+  ctx.arc(xForIndex(latestIndex), valueToY(Number(items[latestIndex].change_pct ?? 0)), 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  const labelIndexes = [0, Math.floor(items.length / 2), items.length - 1].filter(
+    (value, index, array) => array.indexOf(value) === index
+  );
+  ctx.fillStyle = "#8ea0b8";
+  labelIndexes.forEach((index) => {
+    ctx.fillText(items[index].time || "", xForIndex(index) - 14, height - 6);
+  });
+
+  state.marketChartGeometry = {
+    type: "market-line",
+    margin,
+    plotWidth,
+    plotHeight,
+    width,
+    height,
+    items,
+    xForIndex,
+    yForValue: valueToY,
+  };
+
+  if (Number.isInteger(state.marketChartHoverIndex) && state.marketChartHoverIndex < items.length) {
+    const hoverItem = items[state.marketChartHoverIndex];
+    const x = xForIndex(state.marketChartHoverIndex);
+    const y = valueToY(Number(hoverItem.change_pct ?? 0));
+    ctx.strokeStyle = "rgba(126, 231, 247, 0.3)";
+    ctx.beginPath();
+    ctx.moveTo(x, margin.top);
+    ctx.lineTo(x, margin.top + plotHeight);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(margin.left + plotWidth, y);
+    ctx.stroke();
   }
 }
 
@@ -833,6 +1078,22 @@ function hideHistoryTooltip() {
   }
 }
 
+function hideMarketTooltip() {
+  if (marketTooltip instanceof HTMLElement) {
+    marketTooltip.hidden = true;
+  }
+}
+
+function positionMarketTooltip(x, y) {
+  if (!(marketTooltip instanceof HTMLElement) || !(marketChart instanceof HTMLCanvasElement)) {
+    return;
+  }
+  const rect = marketChart.getBoundingClientRect();
+  marketTooltip.hidden = false;
+  marketTooltip.style.left = `${Math.min(x + 12, rect.width - 150)}px`;
+  marketTooltip.style.top = `${Math.max(y - 64, 8)}px`;
+}
+
 function renderTooltipForIndex(index, clientX, clientY) {
   if (!state.chartGeometry || !(historyTooltip instanceof HTMLElement) || !(historyChart instanceof HTMLCanvasElement)) {
     return;
@@ -888,6 +1149,182 @@ function handleChartHover(event) {
   const stepX = state.chartGeometry.items.length > 1 ? state.chartGeometry.plotWidth / (state.chartGeometry.items.length - 1) : 1;
   const index = Math.max(0, Math.min(state.chartGeometry.items.length - 1, Math.round(relative / stepX)));
   renderTooltipForIndex(index, event.clientX, event.clientY);
+}
+
+function renderMarketTooltipForIndex(index) {
+  if (!state.marketChartGeometry || !(marketTooltip instanceof HTMLElement)) {
+    return;
+  }
+  const item = state.marketChartGeometry.items[index];
+  if (!item) {
+    hideMarketTooltip();
+    return;
+  }
+  state.marketChartHoverIndex = index;
+  drawMarketChart();
+  marketTooltip.innerHTML = `
+    <div>${state.marketOverview?.shanghai?.trade_date || ""} ${item.time || ""}</div>
+    <div>价格 ${formatNumber(item.price, 3)}</div>
+    <div>涨幅 ${formatSignedPercent(item.change_pct)}</div>
+  `;
+  positionMarketTooltip(
+    state.marketChartGeometry.xForIndex(index),
+    state.marketChartGeometry.yForValue(Number(item.change_pct ?? 0))
+  );
+}
+
+function handleMarketChartHover(event) {
+  if (!state.marketChartGeometry || !state.marketChartGeometry.items.length || !(marketChart instanceof HTMLCanvasElement)) {
+    hideMarketTooltip();
+    return;
+  }
+  const rect = marketChart.getBoundingClientRect();
+  const offsetX = event.clientX - rect.left;
+  const margin = state.marketChartGeometry.margin;
+  if (offsetX < margin.left - 6 || offsetX > state.marketChartGeometry.width - margin.right + 6) {
+    hideMarketTooltip();
+    return;
+  }
+  const relative = Math.max(0, Math.min(state.marketChartGeometry.plotWidth, offsetX - margin.left));
+  const stepX =
+    state.marketChartGeometry.items.length > 1
+      ? state.marketChartGeometry.plotWidth / (state.marketChartGeometry.items.length - 1)
+      : 1;
+  const index = Math.max(0, Math.min(state.marketChartGeometry.items.length - 1, Math.round(relative / stepX)));
+  renderMarketTooltipForIndex(index);
+}
+
+function applyToneText(element, value, digits = 2, withPercent = false, withSign = false) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+  element.classList.remove("market-up", "market-down", "market-flat");
+  element.classList.add(getToneClassName(value));
+  if (value == null || Number.isNaN(Number(value))) {
+    element.textContent = "-";
+    return;
+  }
+  const numeric = Number(value);
+  const prefix = withSign && numeric > 0 ? "+" : "";
+  element.textContent = `${prefix}${numeric.toFixed(digits)}${withPercent ? "%" : ""}`;
+}
+
+function normalizeShanghaiOverview(shanghai) {
+  if (!shanghai || typeof shanghai !== "object") {
+    return shanghai;
+  }
+
+  const normalized = { ...shanghai };
+  const previousClose =
+    Number.isFinite(Number(normalized.prev_close)) && Number(normalized.prev_close) !== 0
+      ? Number(normalized.prev_close)
+      : null;
+  const openPrice =
+    Number.isFinite(Number(normalized.open)) && Number(normalized.open) !== 0 ? Number(normalized.open) : null;
+  const currentPrice = Number.isFinite(Number(normalized.current)) ? Number(normalized.current) : null;
+  const baseline = previousClose ?? openPrice;
+
+  if (baseline != null && currentPrice != null) {
+    normalized.change = Number((currentPrice - baseline).toFixed(2));
+    normalized.change_pct = Number((((currentPrice / baseline) - 1) * 100).toFixed(2));
+  }
+
+  if (Array.isArray(normalized.items) && baseline != null) {
+    normalized.items = normalized.items.map((item) => {
+      const price = Number(item?.price);
+      if (!Number.isFinite(price) || baseline === 0) {
+        return item;
+      }
+      return {
+        ...item,
+        change_pct: Number((((price / baseline) - 1) * 100).toFixed(2)),
+      };
+    });
+  }
+
+  return normalized;
+}
+
+function renderMarketOverview(payload) {
+  const normalizedPayload = {
+    ...(payload || {}),
+    shanghai: normalizeShanghaiOverview(payload?.shanghai),
+  };
+
+  state.marketOverview = normalizedPayload;
+  state.marketChartItems = normalizedPayload?.shanghai?.items || [];
+  resetMarketChartViewport();
+  drawMarketChart();
+
+  if (marketUpdatedAt instanceof HTMLElement) {
+    marketUpdatedAt.textContent = formatDateTime(normalizedPayload?.updated_at);
+  }
+
+  if (marketShanghaiDate instanceof HTMLElement) {
+    marketShanghaiDate.textContent = normalizedPayload?.shanghai?.trade_date
+      ? `${normalizedPayload.shanghai.trade_date} 当日分时`
+      : "当日分时";
+  }
+
+  if (marketOpen instanceof HTMLElement) {
+    marketOpen.textContent = formatNumber(normalizedPayload?.shanghai?.open, 3);
+  }
+  if (marketCurrent instanceof HTMLElement) {
+    marketCurrent.textContent = formatNumber(normalizedPayload?.shanghai?.current, 3);
+  }
+  applyToneText(marketChange, normalizedPayload?.shanghai?.change, 2, false, true);
+  applyToneText(marketChangePct, normalizedPayload?.shanghai?.change_pct, 2, true, true);
+
+  applyToneText(marketNasdaqPct, normalizedPayload?.nasdaq_previous?.change_pct, 2, true, true);
+  if (marketNasdaqMeta instanceof HTMLElement) {
+    const metaParts = [];
+    if (normalizedPayload?.nasdaq_previous?.trade_date) {
+      metaParts.push(normalizedPayload.nasdaq_previous.trade_date);
+    }
+    if (normalizedPayload?.nasdaq_previous?.close != null) {
+      metaParts.push(`收 ${formatNumber(normalizedPayload.nasdaq_previous.close)}`);
+    }
+    marketNasdaqMeta.textContent = metaParts.join(" | ") || "-";
+  }
+  if (marketNasdaqCard instanceof HTMLElement) {
+    marketNasdaqCard.classList.remove("market-up", "market-down", "market-flat");
+    marketNasdaqCard.classList.add(getToneClassName(normalizedPayload?.nasdaq_previous?.change_pct));
+  }
+
+  if (homeUsLeaderList instanceof HTMLElement) {
+    const items = normalizedPayload?.us_industry_leaders || normalizedPayload?.us_sector_leaders || [];
+    homeUsLeaderList.innerHTML = items.length
+      ? items
+          .map(
+            (item) => {
+              const extraParts = [];
+              if (item.trade_date) {
+                extraParts.push(item.trade_date);
+              }
+              if (item.leader_name) {
+                const leaderTone = item.leader_change_pct != null ? formatSignedPercent(item.leader_change_pct) : "-";
+                extraParts.push(`领涨股 ${item.leader_name} ${leaderTone}`);
+              } else if (item.sector || item.name_en) {
+                extraParts.push(item.sector || item.name_en);
+              }
+              if (item.source) {
+                extraParts.push("同花顺聚合");
+              }
+              return `
+              <div class="market-sector-row">
+                <div class="market-sector-rank">${item.stocks ?? "-"}</div>
+                <div class="market-sector-main">
+                  <div class="market-sector-name">${item.name}</div>
+                  <div class="market-sector-extra">${extraParts.join(" | ") || "-"}</div>
+                </div>
+                <div class="market-sector-change ${getToneClassName(item.change_pct)}">${formatSignedPercent(item.change_pct)}</div>
+              </div>
+            `;
+            }
+          )
+          .join("")
+      : `<div class="placeholder-row">暂无美股板块数据</div>`;
+  }
 }
 
 function updateHistoryHeader() {
@@ -1014,6 +1451,18 @@ async function loadFavorites() {
   renderWatchlist(payload.items || [], payload.updated_at);
 }
 
+async function loadMarketOverview() {
+  const payload = await fetchJson("/api/market-overview?limit=6");
+  renderMarketOverview(payload);
+}
+
+function startMarketPolling() {
+  stopMarketPolling();
+  state.marketPollTimer = window.setInterval(() => {
+    loadMarketOverview().catch(() => {});
+  }, 45000);
+}
+
 async function loadHistory(symbol, period = state.selectedPeriod) {
   state.currentHistorySymbol = symbol;
   state.selectedPeriod = period;
@@ -1066,7 +1515,14 @@ async function removeFavorite(symbol, kind) {
 
 async function initializeDashboard() {
   setStatus("正在加载候选股、实时盯盘、自选股与历史回看...");
-  await Promise.all([loadDashboard(), loadWatchlist(), loadFavorites(), loadHistory(state.currentHistorySymbol), syncRefreshStatus()]);
+  await Promise.all([
+    loadDashboard(),
+    loadWatchlist(),
+    loadFavorites(),
+    loadHistory(state.currentHistorySymbol),
+    loadMarketOverview(),
+    syncRefreshStatus(),
+  ]);
 }
 
 async function retrain() {
@@ -1282,6 +1738,10 @@ historyBackBtn?.addEventListener("click", () => {
   }
 });
 
+historyExpandBtn?.addEventListener("click", () => {
+  toggleHistoryExpanded();
+});
+
 historyZoomInBtn?.addEventListener("click", () => {
   zoomChart(0.85, 0.8);
 });
@@ -1294,6 +1754,19 @@ historyZoomResetBtn?.addEventListener("click", () => {
   resetChartViewport();
   drawCurrentChart();
   setStatus("图表缩放已重置。");
+});
+
+marketZoomInBtn?.addEventListener("click", () => {
+  zoomMarketChart(0.85, 0.8);
+});
+
+marketZoomOutBtn?.addEventListener("click", () => {
+  zoomMarketChart(1.18, 0.8);
+});
+
+marketZoomResetBtn?.addEventListener("click", () => {
+  resetMarketChartViewport();
+  drawMarketChart();
 });
 
 historyChart?.addEventListener("mousemove", (event) => {
@@ -1310,9 +1783,27 @@ historyChart?.addEventListener("wheel", (event) => {
   applyMouseWheelZoom(event);
 });
 
+marketChart?.addEventListener("mousemove", (event) => {
+  handleMarketChartHover(event);
+});
+
+marketChart?.addEventListener("mouseleave", () => {
+  state.marketChartHoverIndex = null;
+  hideMarketTooltip();
+  drawMarketChart();
+});
+
+marketChart?.addEventListener("wheel", (event) => {
+  applyMarketMouseWheelZoom(event);
+});
+
 window.addEventListener("resize", () => {
   drawCurrentChart();
+  drawMarketChart();
 });
+
+syncHistoryLayout();
+startMarketPolling();
 
 initializeDashboard()
   .then(async () => {

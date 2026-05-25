@@ -35,6 +35,7 @@ from app.services.market_watch import (
     merge_live_and_close,
     search_symbols,
 )
+from app.services.market_overview import get_market_overview
 from app.services.modeling import load_model, score_snapshot, train_model
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
@@ -150,6 +151,14 @@ def overview(source: str = "real") -> dict:
         "trained_now": state["trained"],
         "training_metrics": state["metrics"],
     }
+
+
+@app.get("/api/market-overview")
+def market_overview(limit: int = 6) -> dict:
+    try:
+        return get_market_overview(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"market overview unavailable: {exc}") from exc
 
 
 @app.get("/api/picks")

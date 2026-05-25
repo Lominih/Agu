@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>A-Share Local Lab</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260525d" />
   </head>
   <body>
     <main class="app-shell">
@@ -23,6 +23,63 @@
           <button class="nav-item" data-page="watch" type="button">实时盯盘</button>
           <button class="nav-item" data-page="watchlist" type="button">自选股票</button>
         </nav>
+
+        <section class="sidebar-market panel">
+          <div class="sidebar-market-head">
+            <div>
+              <p class="eyebrow">Market Pulse</p>
+              <h3>市场概览</h3>
+            </div>
+            <div id="marketUpdatedAt" class="sidebar-market-updated">加载中...</div>
+          </div>
+
+          <div class="market-nasdaq" id="marketNasdaqCard">
+            <div class="market-mini-label">上个交易日纳指</div>
+            <div class="market-nasdaq-row">
+              <strong id="marketNasdaqPct">-</strong>
+              <span id="marketNasdaqMeta">-</span>
+            </div>
+          </div>
+
+          <div class="market-card">
+            <div class="market-card-head">
+              <div>
+                <h4>上证指数分时</h4>
+                <p id="marketShanghaiDate">当日分时</p>
+              </div>
+              <div class="market-chart-tools">
+                <button id="marketZoomOutBtn" class="market-chart-btn" type="button">缩小</button>
+                <button id="marketZoomResetBtn" class="market-chart-btn" type="button">重置</button>
+                <button id="marketZoomInBtn" class="market-chart-btn" type="button">放大</button>
+              </div>
+            </div>
+
+            <div class="market-chart-wrap">
+              <canvas id="marketChart" width="360" height="180"></canvas>
+              <div id="marketTooltip" class="chart-tooltip" hidden></div>
+            </div>
+
+            <div class="market-metrics">
+              <div class="market-metric">
+                <span class="market-mini-label">开盘价</span>
+                <strong id="marketOpen">-</strong>
+              </div>
+              <div class="market-metric">
+                <span class="market-mini-label">当前价</span>
+                <strong id="marketCurrent">-</strong>
+              </div>
+              <div class="market-metric">
+                <span class="market-mini-label">涨跌额</span>
+                <strong id="marketChange">-</strong>
+              </div>
+              <div class="market-metric">
+                <span class="market-mini-label">涨跌幅</span>
+                <strong id="marketChangePct">-</strong>
+              </div>
+            </div>
+          </div>
+
+        </section>
 
         <div class="sidebar-footer">
           <div class="sidebar-chip">本地运行</div>
@@ -51,6 +108,16 @@
             </section>
 
             <section class="cards home-cards" id="overviewCards"></section>
+
+            <section class="panel home-sector-panel">
+              <div class="panel-head">
+                <div>
+                  <h3>美股上一交易日领涨行业</h3>
+                  <p>按同花顺美股涨幅榜与公司概况页所属行业聚合，展示上一交易日行业强弱</p>
+                </div>
+              </div>
+              <div id="homeUsLeaderList" class="market-sector-grid"></div>
+            </section>
 
             <section class="panel status-grid">
               <div class="status-card">
@@ -186,6 +253,7 @@
               </div>
               <div class="history-head-actions">
                 <button id="historyBackBtn" class="history-mode-btn" type="button" hidden>返回K线</button>
+                <button id="historyExpandBtn" class="history-mode-btn history-expand-btn" type="button" aria-pressed="false">大图模式</button>
                 <div class="history-badge" id="historyBadge">上证指数</div>
               </div>
             </div>
@@ -253,6 +321,6 @@
       </section>
     </main>
 
-    <script src="/assets/app.js"></script>
+    <script src="/assets/app.js?v=20260525d"></script>
   </body>
 </html>
