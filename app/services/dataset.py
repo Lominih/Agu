@@ -79,7 +79,11 @@ def load_index_constituents(pool: str = "hs300") -> list[tuple[str, str]]:
 def _fetch_one_symbol(symbol: str, name: str, start_ts: pd.Timestamp, pool: str) -> pd.DataFrame:
     exchange_symbol = ("sh" if symbol.startswith(("600", "601", "603", "605", "688")) else "sz") + symbol
     hist = ak.stock_zh_a_daily(symbol=exchange_symbol, adjust="qfq")
-    frame = hist[["date", "close", "volume"]].copy()
+    base_columns = ["date", "open", "high", "low", "close", "volume"]
+    available_columns = [column for column in base_columns if column in hist.columns]
+    frame = hist[available_columns].copy()
+    if "amount" in hist.columns:
+        frame["amount"] = hist["amount"]
     frame["date"] = pd.to_datetime(frame["date"])
     frame = frame.loc[frame["date"] >= start_ts].reset_index(drop=True)
     frame["symbol"] = symbol
