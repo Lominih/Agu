@@ -1,5 +1,20 @@
 # A-Share Local Lab
 
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688)
+![LightGBM](https://img.shields.io/badge/LightGBM-Model-2E7D32)
+![Local-first](https://img.shields.io/badge/Local--first-Yes-111111)
+![Paper%20Trading](https://img.shields.io/badge/Paper%20Trading-Enabled-FF6B6B)
+
+## 导航
+
+- [简介](#a-share-local-lab)
+- [界面预览](#界面预览)
+- [功能一览](#功能一览)
+- [快速开始](#快速开始)
+- [FAQ](#faq)
+- [Roadmap](#roadmap)
+
 一个面向 A 股研究场景的本地工作台，集成了 AI 选股、实时盯盘、固定历史回看、自选股管理、热点快报和纸交易模拟盘。
 
 它不是“只给一个模型分数”的小工具，而是一个更接近看盘软件工作流的本地研究平台：
@@ -230,6 +245,20 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 - 验证候选股是否值得跟踪
 - 在本地形成“研究 -> 观察 -> 模拟”的闭环
 
+## 数据来源说明
+
+本项目会结合本地文件、历史缓存和第三方行情接口做回退展示，常见来源包括：
+
+- `AKShare`
+- `easyquotation`
+- 本地缓存与训练产物
+
+界面里展示的数据只用于本地研究和纸交易，不保证与任何第三方平台完全同口径。
+
+## 开源参考
+
+本项目当前以本地研究工作台为目标，界面和流程设计参考了常见的看盘软件使用习惯，也结合了你之前提到的开源项目思路做了本地化整合。
+
 ## 当前已有测试
 
 当前仓库已经包含基础测试，并可直接运行：
@@ -343,6 +372,18 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 - [ ] 增加更完整的回测指标与模型版本追踪
 - [ ] 提升模拟盘的成交、持仓和收益统计能力
 - [ ] 增加提醒、通知和条件监控能力
+
+## 截图说明
+
+如果你要补 GitHub 首页截图，建议放到：
+
+- `docs/screenshots/home-dashboard.png`
+- `docs/screenshots/watchlist-history.png`
+
+也可以继续扩展为：
+
+- `docs/screenshots/paper-trading.png`
+- `docs/screenshots/hot-news.png`
 
 ## 免责声明
 
