@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.core.config import BASE_DIR, DEFAULT_DATA_PATH, DEFAULT_MODEL_PATH, REAL_DATA_PATH, REFRESH_LOG_PATH
-from app.services.dataset import FEATURE_COLUMNS, build_features, build_scoring_frame, latest_snapshot, load_price_data
+from app.services.dataset import FEATURE_COLUMNS, build_features, build_scoring_frame, get_data_health_report, latest_snapshot, load_price_data
 from app.services.hot_news import get_hot_news
 from app.services.market_overview import get_market_overview
 from app.services.market_watch import (
@@ -26,7 +26,7 @@ from app.services.market_watch import (
 )
 from app.services.model_state import read_model_meta, write_model_meta
 from app.services.modeling import build_pick_explanations, load_model, score_snapshot, train_model
-from app.services.paper_portfolio import get_portfolio_snapshot, place_order, reset_portfolio
+from app.services.paper_portfolio import export_portfolio_state, get_portfolio_snapshot, import_portfolio_state, place_order, reset_portfolio, update_portfolio_settings
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
 
@@ -156,6 +156,22 @@ class PortfolioResetPayload(BaseModel):
     initial_cash: float | None = None
 
 
+class PortfolioSettingsPayload(BaseModel):
+    commission_rate: float | None = None
+    min_commission: float | None = None
+    stamp_duty_rate: float | None = None
+    slippage_bps: float | None = None
+
+
+class PortfolioImportPayload(BaseModel):
+    portfolio: dict | None = None
+
+
+class ScreenerPayload(BaseModel):
+    min_predicted_return_5: float | None = 2.0
+    min_confidence_score: float | None = 0.45
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(frontend_dir / "index.html")
@@ -175,12 +191,14 @@ def overview(source: str = "real") -> dict:
     latest_date = ranked["date"].max().strftime("%Y-%m-%d")
     top_pick = ranked.iloc[0]
     model_meta = state.get("model_meta") or {}
+    health = get_data_health_report(prices)
     return {
         "latest_date": latest_date,
         "universe_size": int(prices["symbol"].nunique()),
         "feature_count": len(FEATURE_COLUMNS),
         "sample_rows": int(len(train_features)),
         "data_source": state["source"],
+        "data_health": health,
         "pool": str(prices["pool"].iloc[0]) if "pool" in prices.columns and not prices.empty else "sample",
         "top_pick": {
             "symbol": top_pick["symbol"],
@@ -193,12 +211,26 @@ def overview(source: str = "real") -> dict:
     }
 
 
+@app.get("/api/model-history")
+def model_history() -> dict:
+    meta = read_model_meta()
+    return {"items": meta.get("history") or [], "updated_at": meta.get("updated_at")}
+
+
 @app.get("/api/market-overview")
 def market_overview(limit: int = 6) -> dict:
     try:
         return get_market_overview(limit=limit)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"market overview unavailable: {exc}") from exc
+
+
+@app.get("/api/data-health")
+def data_health(source: str = "real") -> dict:
+    state_source = resolve_state_source(source)
+    _, data_path = get_data_path(state_source)
+    prices = load_price_data(data_path, source=state_source, allow_remote_fetch=False)
+    return get_data_health_report(prices)
 
 
 @app.get("/api/hot-news")
@@ -230,6 +262,10 @@ def picks(limit: int = 8, source: str = "real") -> dict:
                 "reason_texts": row.get("reason_texts") or [],
                 "basis_items": row.get("basis_items") or [],
                 "risk_texts": row.get("risk_texts") or [],
+                "confidence_score": round(float(row.get("confidence_score") or 0), 2) if row.get("confidence_score") is not None else None,
+                "confidence_label": row.get("confidence_label"),
+                "risk_score": round(float(row.get("risk_score") or 0), 2) if row.get("risk_score") is not None else None,
+                "risk_level": row.get("risk_level"),
             }
         )
     return {"items": records, "source": state["source"], "model_meta": state.get("model_meta")}
@@ -323,6 +359,109 @@ def portfolio_order(payload: OrderPayload) -> dict:
 @app.post("/api/portfolio/reset")
 def portfolio_reset(payload: PortfolioResetPayload | None = Body(default=None)) -> dict:
     return reset_portfolio(initial_cash=payload.initial_cash if payload else None)
+
+
+@app.post("/api/portfolio/settings")
+def portfolio_settings(payload: PortfolioSettingsPayload) -> dict:
+    try:
+        return update_portfolio_settings(payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/portfolio/export")
+def portfolio_export() -> dict:
+    return export_portfolio_state()
+
+
+@app.post("/api/portfolio/import")
+def portfolio_import(payload: dict = Body(...)) -> dict:
+    try:
+        return import_portfolio_state(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/screener")
+def screener(min_predicted_return_5: float = 2.0, min_confidence_score: float = 0.45, source: str = "real") -> dict:
+    state = ensure_model(source)
+    ranked = state["ranked"].copy()
+    confidence = ranked["confidence_score"] if "confidence_score" in ranked.columns else 0
+    filtered = ranked.loc[(ranked["predicted_return_5"] * 100 >= min_predicted_return_5) & (confidence >= min_confidence_score)].head(40)
+    return {
+        "items": [
+            {
+                "symbol": row["symbol"],
+                "name": row["name"],
+                "predicted_return_5": round(float(row["predicted_return_5"]) * 100, 2),
+                "confidence_score": round(float(row.get("confidence_score") or 0), 2) if row.get("confidence_score") is not None else None,
+                "confidence_label": row.get("confidence_label"),
+                "risk_level": row.get("risk_level"),
+                "reason_summary": row.get("reason_summary"),
+            }
+            for row in filtered.to_dict(orient="records")
+        ],
+        "source": state["source"],
+    }
+
+
+@app.get("/api/rotation")
+def rotation() -> dict:
+    market = get_market_overview(limit=8)
+    return {
+        "updated_at": market.get("updated_at"),
+        "items": market.get("us_industry_leaders") or [],
+    }
+
+
+@app.get("/api/prepost")
+def prepost() -> dict:
+    market = get_market_overview(limit=4)
+    hot = get_hot_news(limit=8, category="tech")
+    return {
+        "updated_at": market.get("updated_at"),
+        "market": market,
+        "items": [
+            {
+                "title": item.get("title"),
+                "summary": item.get("ai_summary") or item.get("summary"),
+                "time": item.get("published_at"),
+                "tone": item.get("ai_tone"),
+            }
+            for item in hot.get("items", [])[:8]
+        ],
+    }
+
+
+@app.get("/api/timeline/{symbol}")
+def timeline(symbol: str) -> dict:
+    payload = build_history_payload(symbol, period="day", limit=30)
+    events = []
+    for item in payload.get("items", [])[-10:]:
+        events.append(
+            {
+                "date": item.get("date"),
+                "title": f"{payload.get('name') or symbol} 价格回看",
+                "body": f"收盘 {item.get('close')}，涨跌幅 {item.get('change_pct')}%",
+                "tone": "positive" if (item.get("change_pct") or 0) >= 0 else "negative",
+            }
+        )
+    return {"symbol": symbol, "items": events}
+
+
+@app.get("/api/alerts")
+def alerts() -> dict:
+    market = get_market_overview(limit=6)
+    items = []
+    for sector in (market.get("us_industry_leaders") or [])[:6]:
+        items.append(
+            {
+                "title": f"{sector.get('name')} 领涨",
+                "body": f"涨幅 {sector.get('change_pct')}%，领涨股 {sector.get('leader_name') or '-'}",
+                "category": "板块",
+            }
+        )
+    return {"updated_at": market.get("updated_at"), "items": items}
 
 
 @app.post("/api/train")

@@ -1,9 +1,19 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Generated artifacts
 models/
 *.pkl
 *.joblib
 data/*.csv
 data/status/
 data/custom_watchlist.json
+data/paper_portfolio.json
+*.log

@@ -1,9 +1,19 @@
+# Web service
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
+
+# Data processing
 pandas==2.2.3
 numpy==2.2.5
+
+# Modeling
 scikit-learn==1.6.1
 lightgbm==4.6.0
+
+# Market data
 akshare==1.16.84
-python-multipart==0.0.20
 easyquotation==0.7.7
+
+# FastAPI form/file parsing
+python-multipart==0.0.20
+pytest==8.3.5

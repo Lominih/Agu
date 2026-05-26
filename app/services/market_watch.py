@@ -373,6 +373,85 @@ def write_history_cache(payload: dict) -> dict:
     return write_json_file(get_history_cache_path(payload["symbol"], payload["period"]), payload)
 
 
+def build_history_items_from_snapshot(symbol: str, snapshot: dict | None) -> list[dict]:
+    if not snapshot:
+        return []
+    trade_date = snapshot.get("trade_date") or snapshot.get("date")
+    if not trade_date:
+        return []
+    close_price = safe_float(snapshot.get("price") if snapshot.get("price") is not None else snapshot.get("close"))
+    if close_price is None:
+        return []
+    prev_close = safe_float(snapshot.get("pre_close") if snapshot.get("pre_close") is not None else snapshot.get("prev_close"))
+    open_price = safe_float(snapshot.get("open"))
+    if open_price is None:
+        open_price = prev_close if prev_close is not None else close_price
+    high_price = safe_float(snapshot.get("high"))
+    if high_price is None:
+        high_price = max(value for value in (open_price, close_price, prev_close) if value is not None)
+    low_price = safe_float(snapshot.get("low"))
+    if low_price is None:
+        low_price = min(value for value in (open_price, close_price, prev_close) if value is not None)
+    change_pct = safe_float(snapshot.get("change_pct"))
+    if change_pct is None and prev_close not in (None, 0):
+        change_pct = (close_price / prev_close - 1) * 100
+    return [
+        {
+            "date": str(trade_date),
+            "datetime": f"{trade_date} 15:00:00",
+            "open": round(float(open_price), 2) if open_price is not None else None,
+            "high": round(float(high_price), 2) if high_price is not None else None,
+            "low": round(float(low_price), 2) if low_price is not None else None,
+            "close": round(float(close_price), 2),
+            "prev_close": round(float(prev_close), 2) if prev_close is not None else None,
+            "volume": int(float(snapshot["volume"])) if snapshot.get("volume") is not None and pd.notna(snapshot.get("volume")) else None,
+            "amount": round(float(snapshot["amount"]), 2) if snapshot.get("amount") is not None and pd.notna(snapshot.get("amount")) else None,
+            "change_pct": round(float(change_pct), 2) if change_pct is not None else None,
+            "name": snapshot.get("name"),
+            "symbol": normalize_symbol(symbol),
+            "pool": snapshot.get("pool", snapshot.get("mode", "snapshot")),
+        }
+    ]
+
+
+def build_snapshot_history_payload(symbol: str, period: str, limit: int, *, reason: str | None = None) -> dict | None:
+    if is_index_symbol(symbol):
+        return None
+    normalized_symbol = normalize_symbol(symbol)
+    merged_items = merge_live_and_close([normalized_symbol])
+    snapshot = merged_items[0] if merged_items else None
+    items = build_history_items_from_snapshot(normalized_symbol, snapshot)
+    if not items:
+        return None
+    warning_parts = ["远程历史获取失败，已回退到最新快照日线"]
+    if reason:
+        warning_parts.append(str(reason))
+    return {
+        "symbol": normalized_symbol,
+        "period": period,
+        "limit": limit,
+        "name": items[-1].get("name") or (snapshot.get("name") if snapshot else normalized_symbol),
+        "items": items[-limit:],
+        "message": "历史数据已加载，当前为快照回退日线",
+        "availability": {
+            "has_local_history": False,
+            "latest_date": items[-1].get("date"),
+            "rows": len(items),
+            "history_status": "snapshot",
+            "can_fetch_remote": True,
+        },
+        "meta": {
+            "source": "snapshot-fallback",
+            "source_label": "实时/收盘快照回退",
+            "updated_at": now_iso(),
+            "as_of": items[-1].get("datetime") or items[-1].get("date"),
+            "stale": True,
+            "status": "degraded",
+            "warnings": warning_parts,
+        },
+    }
+
+
 def build_history_payload(symbol: str, period: str = "day", limit: int | None = None) -> dict:
     normalized_period = normalize_history_period(period)
     resolved_limit = resolve_history_limit(normalized_period, limit)
@@ -423,6 +502,10 @@ def build_history_payload(symbol: str, period: str = "day", limit: int | None = 
             )
             cached_payload["meta"] = meta
             return cached_payload
+        snapshot_payload = build_snapshot_history_payload(symbol, normalized_period, resolved_limit, reason=str(exc))
+        if snapshot_payload:
+            write_history_cache(snapshot_payload)
+            return snapshot_payload
         raise
 
     latest_name = items[-1].get("name") if items else (get_index_display_name(symbol) if is_index_symbol(symbol) else None)
@@ -560,8 +643,35 @@ def search_symbols(query: str, limit: int = 12) -> list[dict]:
     except Exception:
         pass
 
+    if not records:
+        try:
+            catalog = get_all_stock_catalog().copy()
+            catalog["code_lower"] = catalog["code"].str.lower()
+            catalog["name_lower"] = catalog["name"].str.lower()
+            fuzzy_matches = catalog.loc[
+                catalog["code_lower"].str.contains(keyword, regex=False)
+                | catalog["name_lower"].str.contains(keyword, regex=False)
+                | catalog["name_lower"].str.contains(keyword.replace(" ", ""), regex=False)
+            ].copy()
+            records.extend(
+                {
+                    "symbol": row["code"],
+                    "name": row["name"],
+                    "kind": "stock",
+                    "latest_date": None,
+                    "history_status": "remote",
+                    "history_label": "全市场可抓取",
+                    "has_local_history": False,
+                    "can_remote_history": True,
+                }
+                for row in fuzzy_matches.sort_values(["code"]).head(limit * 4).to_dict(orient="records")
+            )
+        except Exception:
+            pass
+
     index_aliases = [
         {"symbol": "sh000001", "name": "上证指数", "kind": "index", "aliases": ["上证", "沪指", "sh000001"]},
+        {"symbol": "sz399001", "name": "深证成指", "kind": "index", "aliases": ["深证", "深成指", "sz399001"]},
     ]
     for item in index_aliases:
         alias_text = " ".join(item.get("aliases", [])) + f" {item['symbol']} {item['name']}"

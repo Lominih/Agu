@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>A-Share Local Lab</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260526a" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260526c" />
   </head>
   <body>
     <main class="app-shell">
@@ -24,6 +24,11 @@
           <button class="nav-item" data-page="watchlist" type="button">自选股票</button>
           <button class="nav-item" data-page="portfolio" type="button">模拟盘</button>
           <button class="nav-item" data-page="hot" type="button">热点快报</button>
+          <button class="nav-item" data-page="screen" type="button">条件选股</button>
+          <button class="nav-item" data-page="rotation" type="button">行业轮动</button>
+          <button class="nav-item" data-page="prepost" type="button">盘前盘后</button>
+          <button class="nav-item" data-page="timeline" type="button">事件时间线</button>
+          <button class="nav-item" data-page="alerts" type="button">预警通知</button>
         </nav>
 
         <section class="sidebar-market panel">
@@ -256,8 +261,13 @@
                   <h3>模拟盘 / 纸交易</h3>
                   <p>本地记录现金、持仓和成交，不连券商，不动真钱；估值优先使用实时快照，失败时回退到最近收盘。</p>
                 </div>
-                <button id="portfolioResetBtn" class="secondary" type="button">重置模拟盘</button>
+                <div class="portfolio-head-actions">
+                  <button id="portfolioExportBtn" class="secondary" type="button">导出</button>
+                  <button id="portfolioImportBtn" class="secondary" type="button">导入</button>
+                  <button id="portfolioResetBtn" class="secondary" type="button">重置模拟盘</button>
+                </div>
               </div>
+              <input id="portfolioImportFile" class="hidden-file-input" type="file" accept="application/json,.json" hidden />
 
               <div class="cards" id="portfolioSummaryCards"></div>
 
@@ -305,6 +315,36 @@
                       <button class="primary" type="submit">提交模拟单</button>
                     </div>
                   </form>
+
+                  <div class="portfolio-settings">
+                    <div class="subpanel-head">
+                      <h4>交易设置</h4>
+                      <p>可本地调整手续费、印花税和滑点。</p>
+                    </div>
+                    <form id="portfolioSettingsForm" class="portfolio-form">
+                      <div class="form-grid">
+                        <label>
+                          <span>佣金率</span>
+                          <input id="portfolioCommissionRate" type="number" min="0" step="0.0001" />
+                        </label>
+                        <label>
+                          <span>最低佣金</span>
+                          <input id="portfolioMinCommission" type="number" min="0" step="0.01" />
+                        </label>
+                        <label>
+                          <span>印花税率</span>
+                          <input id="portfolioStampDutyRate" type="number" min="0" step="0.0001" />
+                        </label>
+                        <label>
+                          <span>滑点(bps)</span>
+                          <input id="portfolioSlippageBps" type="number" min="0" step="0.1" />
+                        </label>
+                      </div>
+                      <div class="portfolio-form-actions">
+                        <button class="secondary" type="submit">保存设置</button>
+                      </div>
+                    </form>
+                  </div>
                 </section>
 
                 <section class="portfolio-panel portfolio-panel-fill">
@@ -323,6 +363,7 @@
                           <th>现价</th>
                           <th>市值</th>
                           <th>浮盈亏</th>
+                          <th>仓位</th>
                           <th>操作</th>
                         </tr>
                       </thead>
@@ -344,9 +385,11 @@
                         <th>时间</th>
                         <th>代码</th>
                         <th>名称</th>
-                        <th>方向</th>
+                        <th>方向/状态</th>
                         <th>数量</th>
-                        <th>价格</th>
+                        <th>请求价</th>
+                        <th>成交价</th>
+                        <th>手续费</th>
                         <th>费用</th>
                         <th>已实现盈亏</th>
                       </tr>
@@ -374,6 +417,69 @@
                 <div id="hotNewsList" class="hot-news-list"></div>
                 <div id="hotNewsLoadMoreHint" class="hot-news-load-more-hint">向下滚动继续加载</div>
               </div>
+            </section>
+          </section>
+
+          <section class="page" data-page="screen">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>条件选股</h3>
+                  <p>基于当前模型打分做快速筛选。</p>
+                </div>
+              </div>
+              <div id="screenList" class="cards"></div>
+            </section>
+          </section>
+
+          <section class="page" data-page="rotation">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>行业轮动</h3>
+                  <p>板块 / 行业领涨概览。</p>
+                </div>
+              </div>
+              <div id="rotationList" class="market-sector-grid"></div>
+            </section>
+          </section>
+
+          <section class="page" data-page="prepost">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>盘前 / 盘后</h3>
+                  <p>关注盘前盘后消息与催化。</p>
+                </div>
+              </div>
+              <div id="prepostList" class="hot-news-list"></div>
+            </section>
+          </section>
+
+          <section class="page" data-page="timeline">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>事件时间线</h3>
+                  <p>搜索后进入单股时间线回看。</p>
+                </div>
+              </div>
+              <div class="search-box">
+                <input id="timelineSymbolInput" type="text" placeholder="输入股票代码，如 600519" />
+              </div>
+              <div id="timelineList" class="hot-news-list"></div>
+            </section>
+          </section>
+
+          <section class="page" data-page="alerts">
+            <section class="panel panel-fill">
+              <div class="panel-head">
+                <div>
+                  <h3>预警通知</h3>
+                  <p>本地规则生成的关注提醒。</p>
+                </div>
+              </div>
+              <div id="alertsList" class="hot-news-list"></div>
             </section>
           </section>
         </div>
@@ -457,6 +563,8 @@
       </section>
     </main>
 
-    <script src="/assets/app.js?v=20260526a"></script>
+    <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="/assets/app.js?v=20260526c"></script>
   </body>
 </html>

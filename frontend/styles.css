@@ -32,6 +32,7 @@ body {
     radial-gradient(circle at top left, rgba(31, 157, 133, 0.12), transparent 28%),
     radial-gradient(circle at 78% 12%, rgba(255, 91, 87, 0.09), transparent 22%),
     linear-gradient(180deg, #070b11 0%, #0a1018 52%, #05080d 100%);
+  animation: pageFadeIn 360ms ease;
 }
 
 button,
@@ -284,7 +285,6 @@ p {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -364,6 +364,47 @@ p {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.portfolio-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.portfolio-settings {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.trade-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #dbe7f5;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.trade-status-filled {
+  background: rgba(31, 157, 133, 0.16);
+  color: #8bf5e4;
+}
+
+.trade-status-open,
+.trade-status-pending {
+  background: rgba(255, 194, 76, 0.12);
+  color: #ffd36a;
 }
 
 .mini-btn-strong {
@@ -519,6 +560,7 @@ p {
   color: inherit;
   text-decoration: none;
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  animation: cardRise 280ms ease;
 }
 
 .brief-item:hover {
@@ -608,6 +650,13 @@ p {
 
 .hot-news-empty {
   border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.placeholder-row {
+  padding: 18px 14px;
+  border-radius: 14px;
+  color: var(--muted);
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -731,6 +780,7 @@ p {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  animation: pageSlideUp 240ms ease;
 }
 
 .hero,
@@ -824,31 +874,96 @@ p {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 
 .card {
-  padding: 16px 18px;
+  padding: 10px 12px;
+  animation: cardRise 280ms ease;
+}
+
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pageSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cardRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .card .label {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .card .value {
-  margin-top: 8px;
-  font-size: clamp(24px, 2vw, 30px);
+  margin-top: 6px;
+  font-size: clamp(16px, 1.35vw, 21px);
   font-weight: 800;
   letter-spacing: -0.03em;
 }
 
 .card .hint {
-  margin-top: 8px;
+  margin-top: 5px;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.home-cards,
+.metric-grid {
+  gap: 8px;
+}
+
+.home-cards .card,
+.metric-grid .card {
+  min-height: 84px;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.metric-grid .card .value {
+  font-size: clamp(15px, 1.2vw, 19px);
+}
+
+.metric-grid .card .hint {
+  font-size: 9px;
 }
 
 .panel {
@@ -1072,6 +1187,12 @@ p {
   background: rgba(31, 157, 133, 0.08);
 }
 
+.search-result-row:focus-within,
+.search-result-row.is-active {
+  background: rgba(31, 157, 133, 0.12);
+  outline: 1px solid rgba(77, 229, 208, 0.18);
+}
+
 .search-result-main {
   display: flex;
   align-items: center;
@@ -1104,6 +1225,26 @@ p {
   flex: 0 0 auto;
 }
 
+.pick-meta-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.pick-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  color: #bcd0e4;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .search-action-btn {
   min-height: 30px;
   padding: 6px 11px;
@@ -1128,6 +1269,52 @@ p {
 .search-empty {
   padding: 14px;
   font-size: 13px;
+}
+
+.toast-stack {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 240;
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(8, 13, 20, 0.96);
+  color: #e5edf7;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-success {
+  border-color: rgba(77, 229, 208, 0.2);
+  background:
+    linear-gradient(180deg, rgba(7, 16, 15, 0.98) 0%, rgba(6, 12, 12, 0.96) 100%);
+  color: #9bf5e7;
+}
+
+.toast-error {
+  border-color: rgba(255, 107, 102, 0.22);
+  background:
+    linear-gradient(180deg, rgba(22, 10, 11, 0.98) 0%, rgba(17, 8, 9, 0.96) 100%);
+  color: #ffb4b1;
 }
 
 .chart-wrap {
@@ -1546,6 +1733,10 @@ body.history-expanded .page.active {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .status-grid {
     grid-template-columns: 1fr;
   }
@@ -1647,6 +1838,10 @@ body.history-expanded .page.active {
     width: 100%;
   }
 
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
   .market-metrics {
     grid-template-columns: 1fr;
   }
@@ -1663,6 +1858,17 @@ body.history-expanded .page.active {
 
   .search-result-actions {
     justify-content: flex-end;
+  }
+
+  .toast-stack {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .toast {
+    max-width: none;
+    min-width: 0;
   }
 
   .chart-wrap canvas {

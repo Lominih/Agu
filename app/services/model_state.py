@@ -15,6 +15,7 @@ def default_model_meta() -> dict[str, Any]:
         "feature_columns": [],
         "metrics": None,
         "backtest": None,
+        "history": [],
     }
 
 
@@ -34,6 +35,8 @@ def write_model_meta(
     metrics: dict[str, Any] | None,
     backtest: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    current = read_model_meta()
+    history = list(current.get("history") or [])
     payload = {
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "source": source,
@@ -41,5 +44,18 @@ def write_model_meta(
         "feature_columns": feature_columns,
         "metrics": metrics,
         "backtest": backtest,
+        "version": f"{source}-{pool}-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        "history": history[-19:]
+        + [
+            {
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "source": source,
+                "pool": pool,
+                "feature_count": len(feature_columns),
+                "metrics": metrics,
+                "backtest": backtest,
+                "version": f"{source}-{pool}-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            }
+        ],
     }
     return write_json_file(MODEL_META_PATH, payload)

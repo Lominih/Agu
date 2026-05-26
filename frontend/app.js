@@ -57,13 +57,28 @@ const portfolioMeta = document.querySelector("#portfolioMeta");
 const portfolioPositionsTable = document.querySelector("#portfolioPositionsTable");
 const portfolioTradesTable = document.querySelector("#portfolioTradesTable");
 const portfolioForm = document.querySelector("#portfolioForm");
+const portfolioSettingsForm = document.querySelector("#portfolioSettingsForm");
 const portfolioResetBtn = document.querySelector("#portfolioResetBtn");
+const portfolioExportBtn = document.querySelector("#portfolioExportBtn");
+const portfolioImportBtn = document.querySelector("#portfolioImportBtn");
+const portfolioImportFile = document.querySelector("#portfolioImportFile");
 const portfolioSymbol = document.querySelector("#portfolioSymbol");
 const portfolioName = document.querySelector("#portfolioName");
 const portfolioSide = document.querySelector("#portfolioSide");
 const portfolioQty = document.querySelector("#portfolioQty");
 const portfolioPriceMode = document.querySelector("#portfolioPriceMode");
 const portfolioPrice = document.querySelector("#portfolioPrice");
+const portfolioCommissionRate = document.querySelector("#portfolioCommissionRate");
+const portfolioMinCommission = document.querySelector("#portfolioMinCommission");
+const portfolioStampDutyRate = document.querySelector("#portfolioStampDutyRate");
+const portfolioSlippageBps = document.querySelector("#portfolioSlippageBps");
+const screenList = document.querySelector("#screenList");
+const rotationList = document.querySelector("#rotationList");
+const prepostList = document.querySelector("#prepostList");
+const timelineList = document.querySelector("#timelineList");
+const timelineSymbolInput = document.querySelector("#timelineSymbolInput");
+const alertsList = document.querySelector("#alertsList");
+const toastStack = document.querySelector("#toastStack");
 
 const defaultSource = "real";
 const defaultPool = "hs300";
@@ -104,6 +119,7 @@ const state = {
   marketPollTimer: null,
   searchTimer: null,
   searchSeq: 0,
+  historySeq: 0,
   picks: [],
   watch: [],
   favorites: [],
@@ -149,6 +165,23 @@ function setStatus(message) {
   statusBox.textContent = `${new Date().toLocaleString("zh-CN")}\n${message}`;
 }
 
+function pushToast(message, tone = "success") {
+  if (!(toastStack instanceof HTMLElement) || !message) {
+    return;
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${tone}`;
+  toast.textContent = message;
+  toastStack.appendChild(toast);
+  window.setTimeout(() => {
+    toast.classList.add("is-visible");
+  }, 10);
+  window.setTimeout(() => {
+    toast.classList.remove("is-visible");
+    window.setTimeout(() => toast.remove(), 220);
+  }, 2600);
+}
+
 function switchPage(pageName) {
   navItems.forEach((item) => {
     item.classList.toggle("active", item.dataset.page === pageName);
@@ -158,6 +191,14 @@ function switchPage(pageName) {
   });
   if (pageName === "portfolio") {
     loadPortfolio().catch(() => {});
+  } else if (pageName === "screen") {
+    loadScreen().catch((error) => setStatus(`条件选股加载失败: ${error.message}`));
+  } else if (pageName === "rotation") {
+    loadRotation().catch((error) => setStatus(`行业轮动加载失败: ${error.message}`));
+  } else if (pageName === "prepost") {
+    loadPrePost().catch((error) => setStatus(`盘前盘后加载失败: ${error.message}`));
+  } else if (pageName === "alerts") {
+    loadAlerts().catch((error) => setStatus(`预警加载失败: ${error.message}`));
   }
 }
 
@@ -214,6 +255,13 @@ function formatCurrency(value) {
   return `￥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatPercent(value, digits = 2) {
+  if (value == null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return `${Number(value).toFixed(digits)}%`;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -268,6 +316,51 @@ function setMetaStrip(element, text, tone = "neutral") {
   }
 }
 
+function syncPortfolioPriceMode() {
+  if (!(portfolioPriceMode instanceof HTMLSelectElement) || !(portfolioPrice instanceof HTMLInputElement)) {
+    return;
+  }
+  const isManual = portfolioPriceMode.value === "manual";
+  portfolioPrice.disabled = !isManual;
+  portfolioPrice.required = isManual;
+  portfolioPrice.placeholder = isManual ? "仅手工价时填写" : "手工价仅在手工模式下生效";
+}
+
+function buildPortfolioExportFilename(exportedAt) {
+  const stamp = exportedAt ? new Date(exportedAt) : new Date();
+  if (Number.isNaN(stamp.getTime())) {
+    return "paper-portfolio-export.json";
+  }
+  return `paper-portfolio-export-${stamp.toISOString().replace(/[:.]/g, "-")}.json`;
+}
+
+function downloadJsonFile(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function readJsonFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        resolve(JSON.parse(String(reader.result || "")));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
 async function fetchJson(url, options) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
@@ -309,6 +402,8 @@ function renderCards(overview) {
     all: "合并股票池",
     sample: "样例池",
   };
+  const dataHealth = overview?.data_health || {};
+  const healthSummary = dataHealth.summary || {};
   const cards = [
     {
       label: "股票池规模",
@@ -340,6 +435,11 @@ function renderCards(overview) {
       value: overview.top_pick?.name || "-",
       hint: `${overview.top_pick?.symbol || "-"} | 预测未来5日 ${overview.top_pick?.predicted_return_5 ?? "-"}%`,
     },
+    {
+      label: "数据健康",
+      value: dataHealth.status === "healthy" ? "正常" : dataHealth.status === "warn" ? "需检查" : "未知",
+      hint: healthSummary.latest_date ? `最新数据 ${healthSummary.latest_date} | 问题 ${dataHealth.issues?.length || 0} 项` : "等待数据健康报告",
+    },
   ];
   overviewCards.innerHTML = cards
     .map(
@@ -362,7 +462,14 @@ function renderModelMetrics(overview) {
   const meta = overview?.model_meta || {};
   const metrics = meta.metrics || overview?.training_metrics || {};
   const backtest = meta.backtest || metrics.backtest || {};
+  const rolling = metrics.rolling_backtest || meta.metrics?.rolling_backtest || {};
+  const version = meta.version || (Array.isArray(meta.history) && meta.history.length ? meta.history[meta.history.length - 1].version : "-");
   const cards = [
+    {
+      label: "模型版本",
+      value: version || "-",
+      hint: "每次训练都会写入一个可追踪版本号",
+    },
     {
       label: "测试集 R²",
       value: metrics.test_r2 != null ? Number(metrics.test_r2).toFixed(4) : "-",
@@ -382,6 +489,26 @@ function renderModelMetrics(overview) {
       label: "Top10 胜率",
       value: backtest.hit_rate != null ? formatSignedPercent(Number(backtest.hit_rate) * 100) : "-",
       hint: "测试阶段 Top10 候选中未来 5 日为正收益的平均比例",
+    },
+    {
+      label: "滚动年化",
+      value: rolling.annualized_return != null ? formatSignedPercent(Number(rolling.annualized_return) * 100) : "-",
+      hint: "按滚动测试区间估算的策略年化收益",
+    },
+    {
+      label: "最大回撤",
+      value: rolling.max_drawdown != null ? formatSignedPercent(Number(rolling.max_drawdown) * 100) : "-",
+      hint: "滚动测试区间内的最大回撤",
+    },
+    {
+      label: "Sharpe",
+      value: rolling.sharpe != null ? Number(rolling.sharpe).toFixed(3) : "-",
+      hint: "滚动测试区间的收益风险比",
+    },
+    {
+      label: "RankIC",
+      value: rolling.rank_ic != null ? Number(rolling.rank_ic).toFixed(3) : "-",
+      hint: "预测排序与未来收益排序的一致性",
     },
   ];
   modelMetricsCards.innerHTML = cards
@@ -408,6 +535,8 @@ function renderPicks(items) {
       const reasonTexts = Array.isArray(item.reason_texts) ? item.reason_texts : [];
       const basisItems = Array.isArray(item.basis_items) ? item.basis_items : [];
       const riskTexts = Array.isArray(item.risk_texts) ? item.risk_texts : [];
+      const confidenceScore = item.confidence_score != null ? Math.round(Number(item.confidence_score) * 100) : null;
+      const riskScore = item.risk_score != null ? Math.round(Number(item.risk_score) * 100) : null;
       const tagsMarkup = reasonTags.length ? reasonTags.map((tag) => `<span class="pick-tag">${escapeHtml(tag)}</span>`).join("") : `<span class="pick-tag">综合因子占优</span>`;
       const reasonsMarkup = reasonTexts.length
         ? `<div class="pick-detail-block">
@@ -457,6 +586,10 @@ function renderPicks(items) {
             <div class="pick-summary-cell">
               <div class="pick-summary-text">${escapeHtml(item.reason_summary || "综合因子占优")}</div>
               <div class="pick-tags">${tagsMarkup}</div>
+              <div class="pick-meta-row">
+                <span class="pick-meta-chip">置信度 ${item.confidence_label || "-"}${confidenceScore != null ? ` ${confidenceScore}%` : ""}</span>
+                <span class="pick-meta-chip">风险 ${item.risk_level || "-"}${riskScore != null ? ` ${riskScore}%` : ""}</span>
+              </div>
             </div>
           </td>
           <td>
@@ -1387,6 +1520,11 @@ function renderPortfolio(snapshot) {
     { label: "浮动盈亏", value: formatCurrency(snapshot?.unrealized_pnl), hint: "当前持仓未实现盈亏" },
     { label: "已实现盈亏", value: formatCurrency(snapshot?.realized_pnl), hint: "已完成卖出后记录的盈亏" },
     { label: "成交笔数", value: `${snapshot?.trade_count ?? 0}`, hint: "本地模拟单累计成交笔数" },
+    { label: "持仓数量", value: `${snapshot?.position_count ?? 0}`, hint: "当前持仓股票数量" },
+    { label: "仓位占比", value: formatPercent(Number(snapshot?.position_ratio_pct ?? Number(snapshot?.position_ratio ?? 0) * 100)), hint: "持仓市值 / 总资产" },
+    { label: "现金占比", value: formatPercent(Number(snapshot?.cash_ratio_pct ?? Number(snapshot?.cash_ratio ?? 0) * 100)), hint: "现金 / 总资产" },
+    { label: "累计费用", value: formatCurrency(snapshot?.total_fees), hint: "累计佣金、印花税等费用" },
+    { label: "胜率", value: formatPercent(snapshot?.win_rate_pct), hint: "已完成卖出中的盈利笔数占比" },
   ];
   portfolioSummaryCards.innerHTML = summaryCards
     .map(
@@ -1400,8 +1538,14 @@ function renderPortfolio(snapshot) {
     )
     .join("");
   if (portfolioMeta instanceof HTMLElement) {
-    portfolioMeta.textContent = `最近快照 ${formatDateTime(snapshot?.updated_at)} | 初始资金 ${formatCurrency(snapshot?.initial_cash)}`;
+    portfolioMeta.textContent = `最近快照 ${formatDateTime(snapshot?.updated_at)} | 初始资金 ${formatCurrency(snapshot?.initial_cash)} | 成交 ${snapshot?.trade_count ?? 0} 笔`;
   }
+  const settings = snapshot?.settings || {};
+  if (portfolioCommissionRate instanceof HTMLInputElement) portfolioCommissionRate.value = settings.commission_rate ?? "";
+  if (portfolioMinCommission instanceof HTMLInputElement) portfolioMinCommission.value = settings.min_commission ?? "";
+  if (portfolioStampDutyRate instanceof HTMLInputElement) portfolioStampDutyRate.value = settings.stamp_duty_rate ?? "";
+  if (portfolioSlippageBps instanceof HTMLInputElement) portfolioSlippageBps.value = settings.slippage_bps ?? "";
+  syncPortfolioPriceMode();
   const positions = Array.isArray(snapshot?.positions) ? snapshot.positions : [];
   portfolioPositionsTable.innerHTML = positions.length
     ? positions
@@ -1414,6 +1558,7 @@ function renderPortfolio(snapshot) {
             <td>${formatNumber(item.current_price)}</td>
             <td>${formatCurrency(item.market_value)}</td>
             <td>${formatCurrency(item.unrealized_pnl)}</td>
+            <td>${formatPercent(item.weight_pct)}</td>
             <td>
               <div class="table-actions">
                 <button class="mini-btn" data-action="view" data-symbol="${item.symbol}" data-name="${escapeHtml(item.name || "")}" type="button">查看</button>
@@ -1423,7 +1568,7 @@ function renderPortfolio(snapshot) {
           </tr>
         `)
         .join("")
-    : `<tr class="placeholder-row"><td colspan="8">暂无持仓，先从候选股或搜索结果里下第一笔模拟单。</td></tr>`;
+    : `<tr class="placeholder-row"><td colspan="9">暂无持仓，先从候选股或搜索结果里下第一笔模拟单。</td></tr>`;
   const trades = Array.isArray(snapshot?.recent_trades) ? snapshot.recent_trades : [];
   portfolioTradesTable.innerHTML = trades.length
     ? trades
@@ -1432,15 +1577,122 @@ function renderPortfolio(snapshot) {
             <td>${formatDateTime(trade.executed_at)}</td>
             <td>${trade.symbol}</td>
             <td>${escapeHtml(trade.name || "-")}</td>
-            <td>${trade.side === "buy" ? "买入" : "卖出"}</td>
+            <td><span class="trade-status trade-status-${escapeHtml(trade.status || "filled")}">${trade.side === "buy" ? "买入" : "卖出"} / ${trade.status || "-"}</span></td>
             <td>${trade.quantity}</td>
+            <td>${formatNumber(trade.requested_price ?? trade.price)}</td>
             <td>${formatNumber(trade.price)}</td>
+            <td>${formatCurrency(trade.commission)}</td>
             <td>${formatCurrency(trade.fees)}</td>
             <td>${formatCurrency(trade.realized_pnl)}</td>
           </tr>
         `)
         .join("")
-    : `<tr class="placeholder-row"><td colspan="8">暂无成交记录</td></tr>`;
+    : `<tr class="placeholder-row"><td colspan="10">暂无成交记录</td></tr>`;
+}
+
+function renderScreen(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!(screenList instanceof HTMLElement)) return;
+  screenList.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `
+            <article class="card card-compact">
+              <div class="label">${escapeHtml(item.symbol)} ${escapeHtml(item.name || "")}</div>
+              <div class="value">${formatSignedPercent(item.predicted_return_5)}</div>
+              <div class="hint">${escapeHtml(item.reason_summary || "模型筛选")}</div>
+            </article>
+          `
+        )
+        .join("")
+    : `<div class="placeholder-row">暂无符合条件的股票</div>`;
+}
+
+function renderRotation(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!(rotationList instanceof HTMLElement)) return;
+  rotationList.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `
+            <div class="market-sector-row">
+              <div class="market-sector-rank">${item.stocks ?? "-"}</div>
+              <div class="market-sector-main">
+                <div class="market-sector-name">${escapeHtml(item.name || "-")}</div>
+                <div class="market-sector-extra">${escapeHtml(item.leader_name || "-")}</div>
+              </div>
+              <div class="market-sector-change ${getToneClassName(item.change_pct)}">${formatSignedPercent(item.change_pct)}</div>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="placeholder-row">暂无行业轮动数据</div>`;
+}
+
+function renderPrePost(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!(prepostList instanceof HTMLElement)) return;
+  prepostList.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `
+            <div class="brief-item">
+              <div class="brief-side">
+                <div class="brief-time">${escapeHtml(item.time || "-")}</div>
+                <div class="brief-ai ${item.tone === "positive" ? "news-positive" : item.tone === "negative" ? "news-negative" : "news-neutral"}">${escapeHtml(item.summary || "-")}</div>
+              </div>
+              <div class="brief-main">
+                <div class="brief-title">${escapeHtml(item.title || "-")}</div>
+              </div>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="placeholder-row">暂无盘前盘后内容</div>`;
+}
+
+function renderTimeline(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!(timelineList instanceof HTMLElement)) return;
+  timelineList.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `
+            <div class="brief-item">
+              <div class="brief-side">
+                <div class="brief-time">${escapeHtml(item.date || "-")}</div>
+                <div class="brief-ai ${item.tone === "positive" ? "news-positive" : "news-negative"}">${escapeHtml(item.title || "-")}</div>
+              </div>
+              <div class="brief-main">
+                <div class="brief-summary">${escapeHtml(item.body || "-")}</div>
+              </div>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="placeholder-row">输入代码后查看时间线</div>`;
+}
+
+function renderAlerts(payload) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!(alertsList instanceof HTMLElement)) return;
+  alertsList.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `
+            <div class="brief-item">
+              <div class="brief-side">
+                <div class="brief-time">${escapeHtml(item.category || "提醒")}</div>
+                <div class="brief-ai news-positive">${escapeHtml(item.title || "-")}</div>
+              </div>
+              <div class="brief-main">
+                <div class="brief-summary">${escapeHtml(item.body || "-")}</div>
+              </div>
+            </div>
+          `
+        )
+        .join("")
+    : `<div class="placeholder-row">暂无预警</div>`;
 }
 
 function stopRefreshPolling() {
@@ -1513,6 +1765,26 @@ async function loadPortfolio() {
   renderPortfolio(payload);
 }
 
+async function loadScreen() {
+  const payload = await fetchJson("/api/screener");
+  renderScreen(payload);
+}
+
+async function loadRotation() {
+  const payload = await fetchJson("/api/rotation");
+  renderRotation(payload);
+}
+
+async function loadPrePost() {
+  const payload = await fetchJson("/api/prepost");
+  renderPrePost(payload);
+}
+
+async function loadAlerts() {
+  const payload = await fetchJson("/api/alerts");
+  renderAlerts(payload);
+}
+
 async function loadMarketOverview() {
   const payload = await fetchJson("/api/market-overview?limit=6");
   renderMarketOverview(payload);
@@ -1562,17 +1834,25 @@ function startMarketPolling() {
 }
 
 async function loadHistory(symbol, period = state.selectedPeriod) {
+  const requestSeq = ++state.historySeq;
   state.currentHistorySymbol = symbol;
   state.selectedPeriod = period;
   setActivePeriodButton(period);
   const limit = periodLimitMap[period] || 120;
   const payload = await fetchJson(`/api/history/${symbol}?period=${encodeURIComponent(period)}&limit=${limit}`);
+  if (requestSeq !== state.historySeq) {
+    return null;
+  }
   renderHistoryPayload(payload);
   return payload;
 }
 
 async function loadIntradayHistory(symbol, tradeDate) {
+  const requestSeq = ++state.historySeq;
   const payload = await fetchJson(`/api/watch-intraday/${symbol}?trade_date=${encodeURIComponent(tradeDate)}`);
+  if (requestSeq !== state.historySeq) {
+    return null;
+  }
   renderIntradayPayload(payload);
   return payload;
 }
@@ -1582,15 +1862,16 @@ async function searchStocks(query) {
   const searchSeq = ++state.searchSeq;
   if (!keyword) {
     renderSearchResults({ state: "idle" });
-    return;
+    return { items: [], query: keyword };
   }
   renderSearchResults({ state: "loading", query: keyword });
   try {
     const payload = await fetchJson(`/api/search?query=${encodeURIComponent(keyword)}&limit=12`);
-    if (searchSeq !== state.searchSeq) return;
+    if (searchSeq !== state.searchSeq) return null;
     renderSearchResults({ ...payload, state: "success" });
+    return payload;
   } catch (error) {
-    if (searchSeq !== state.searchSeq) return;
+    if (searchSeq !== state.searchSeq) return null;
     renderSearchResults({ state: "error", query: keyword, error: error.message });
     throw error;
   }
@@ -1623,7 +1904,12 @@ async function submitPaperOrder({ symbol, name, side, quantity, priceMode = "liv
     body: JSON.stringify({ symbol, name, side, quantity, price_mode: priceMode, price }),
   });
   renderPortfolio(payload.snapshot);
-  setStatus(`${symbol} ${side === "buy" ? "买入" : "卖出"} 模拟单已成交。`);
+  const trade = payload.trade || {};
+  const sideLabel = side === "buy" ? "买入" : "卖出";
+  const priceLabel = trade.price != null ? formatNumber(trade.price) : "-";
+  const qtyLabel = trade.quantity != null ? `${trade.quantity} 股` : `${quantity} 股`;
+  setStatus(`${symbol} ${sideLabel} 模拟单已成交。\n成交价格 ${priceLabel} | 数量 ${qtyLabel}`);
+  pushToast(`${symbol} ${sideLabel}成交 ${qtyLabel} @ ${priceLabel}`, "success");
   return payload;
 }
 
@@ -1641,9 +1927,56 @@ async function resetPortfolio() {
   setStatus("模拟盘已重置。");
 }
 
+async function savePortfolioSettings() {
+  const payload = {
+    commission_rate: portfolioCommissionRate instanceof HTMLInputElement ? Number(portfolioCommissionRate.value || 0) : 0,
+    min_commission: portfolioMinCommission instanceof HTMLInputElement ? Number(portfolioMinCommission.value || 0) : 0,
+    stamp_duty_rate: portfolioStampDutyRate instanceof HTMLInputElement ? Number(portfolioStampDutyRate.value || 0) : 0,
+    slippage_bps: portfolioSlippageBps instanceof HTMLInputElement ? Number(portfolioSlippageBps.value || 0) : 0,
+  };
+  const snapshot = await fetchJson("/api/portfolio/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  renderPortfolio(snapshot);
+  setStatus("模拟盘交易设置已更新。");
+}
+
+async function exportPortfolio() {
+  const payload = await fetchJson("/api/portfolio/export");
+  downloadJsonFile(buildPortfolioExportFilename(payload.exported_at), payload);
+  setStatus("模拟盘数据已开始下载。");
+}
+
+async function importPortfolio() {
+  if (!(portfolioImportFile instanceof HTMLInputElement) || !portfolioImportFile.files?.length) {
+    portfolioImportFile?.click?.();
+    return;
+  }
+  const file = portfolioImportFile.files[0];
+  const payload = await readJsonFile(file);
+  const snapshot = await fetchJson("/api/portfolio/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  renderPortfolio(snapshot);
+  setStatus("模拟盘数据已导入。");
+  portfolioImportFile.value = "";
+}
+
 async function initializeDashboard() {
   setStatus("正在加载候选股、实时盯盘、自选股、模拟盘与历史回看...");
-  await Promise.all([loadDashboard(), loadWatchlist(), loadFavorites(), loadPortfolio(), loadHistory(state.currentHistorySymbol), loadMarketOverview(), loadHotNews(), syncRefreshStatus()]);
+  const results = await Promise.allSettled([loadDashboard(), loadWatchlist(), loadFavorites(), loadPortfolio(), loadHistory(state.currentHistorySymbol), loadMarketOverview(), loadHotNews(), syncRefreshStatus()]);
+  const rejected = results.filter((result) => result.status === "rejected");
+  if (rejected.length) {
+    setStatus(`首屏已加载完成，但有 ${rejected.length} 项接口失败。\n${rejected.map((item) => item.reason?.message || "未知错误").join(" | ")}`);
+  }
+  loadScreen().catch(() => {});
+  loadRotation().catch(() => {});
+  loadPrePost().catch(() => {});
+  loadAlerts().catch(() => {});
 }
 
 async function retrain() {
@@ -1675,6 +2008,7 @@ function fillPortfolioForm(symbol, name, side = "buy") {
   if (portfolioSymbol instanceof HTMLInputElement) portfolioSymbol.value = symbol || "";
   if (portfolioName instanceof HTMLInputElement) portfolioName.value = name || "";
   if (portfolioSide instanceof HTMLSelectElement) portfolioSide.value = side;
+  syncPortfolioPriceMode();
   switchPage("portfolio");
 }
 
@@ -1683,8 +2017,40 @@ function handleHistoryJump(symbol, name) {
   if (stockSearchInput instanceof HTMLInputElement) stockSearchInput.blur();
   setStatus(`正在加载 ${symbol}${name ? ` ${name}` : ""} 的历史回看...`);
   loadHistory(symbol, state.selectedPeriod)
-    .then(() => setStatus(`已切换到 ${symbol}${name ? ` ${name}` : ""} 的历史回看。`))
-    .catch((error) => setStatus(`历史回看加载失败: ${error.message}`));
+    .then((payload) => {
+      if (!payload) return;
+      setStatus(`已切换到 ${symbol}${name ? ` ${name}` : ""} 的历史回看。`);
+    })
+    .catch(async (error) => {
+      if (state.selectedPeriod !== "day") {
+        try {
+          const payload = await loadHistory(symbol, "day");
+          if (payload) {
+            setStatus(`${symbol}${name ? ` ${name}` : ""} 当前周期加载失败，已自动回退到日线。`);
+            pushToast("当前周期不可用，已自动回退到日线", "error");
+            return;
+          }
+        } catch (fallbackError) {
+          setStatus(`历史回看加载失败: ${fallbackError.message}`);
+          pushToast(`历史回看失败: ${fallbackError.message}`, "error");
+          return;
+        }
+      }
+      setStatus(`历史回看加载失败: ${error.message}`);
+      pushToast(`历史回看失败: ${error.message}`, "error");
+    });
+}
+
+async function quickBuyFromSearch(symbol, name) {
+  await buyPaperLot(symbol, name);
+  if (searchResults instanceof HTMLElement) {
+    searchResults.innerHTML = "";
+  }
+  if (stockSearchInput instanceof HTMLInputElement) {
+    stockSearchInput.blur();
+  }
+  fillPortfolioForm(symbol, name, "buy");
+  switchPage("portfolio");
 }
 
 refreshBtn?.addEventListener("click", () => {
@@ -1808,8 +2174,21 @@ historyTable?.addEventListener("click", (event) => {
   const button = target.closest("[data-trade-date]");
   if (!(button instanceof HTMLElement) || !button.dataset.tradeDate) return;
   loadIntradayHistory(state.currentHistorySymbol, button.dataset.tradeDate)
-    .then((payload) => setStatus(payload.message || `已切换到 ${button.dataset.tradeDate} 的当日涨跌图。`))
+    .then((payload) => {
+      if (!payload) return;
+      setStatus(payload.message || `已切换到 ${button.dataset.tradeDate} 的当日涨跌图。`);
+    })
     .catch((error) => setStatus(`当日涨跌图加载失败: ${error.message}`));
+});
+
+timelineSymbolInput?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLInputElement)) return;
+  fetchJson(`/api/timeline/${encodeURIComponent(target.value.trim())}`)
+    .then((payload) => renderTimeline(payload))
+    .catch((error) => setStatus(`时间线加载失败: ${error.message}`));
 });
 
 stockSearchInput?.addEventListener("input", (event) => {
@@ -1817,6 +2196,7 @@ stockSearchInput?.addEventListener("input", (event) => {
   if (!(target instanceof HTMLInputElement)) return;
   if (state.searchTimer) window.clearTimeout(state.searchTimer);
   state.searchTimer = window.setTimeout(() => {
+    state.searchTimer = null;
     searchStocks(target.value).catch((error) => setStatus(`搜索失败: ${error.message}`));
   }, 180);
 });
@@ -1825,7 +2205,19 @@ stockSearchInput?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   event.preventDefault();
   if (!(event.currentTarget instanceof HTMLInputElement)) return;
+  if (state.searchTimer) {
+    window.clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+  }
   searchStocks(event.currentTarget.value).catch((error) => setStatus(`搜索失败: ${error.message}`));
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "/" && !event.ctrlKey && !event.metaKey && !(document.activeElement instanceof HTMLInputElement)) {
+    event.preventDefault();
+    stockSearchInput?.focus();
+    stockSearchInput?.select?.();
+  }
 });
 
 searchResults?.addEventListener("click", (event) => {
@@ -1840,9 +2232,12 @@ searchResults?.addEventListener("click", (event) => {
   }
   const buyButton = target.closest("[data-action='buy-paper']");
   if (buyButton instanceof HTMLElement && buyButton.dataset.symbol) {
-    buyPaperLot(buyButton.dataset.symbol, buyButton.dataset.name || "")
-      .then(() => fillPortfolioForm(buyButton.dataset.symbol, buyButton.dataset.name || "", "buy"))
-      .catch((error) => setStatus(`模拟买入失败: ${error.message}`));
+    quickBuyFromSearch(buyButton.dataset.symbol, buyButton.dataset.name || "")
+      .then(() => setStatus(`${buyButton.dataset.symbol} 已买入并切到模拟盘。`))
+      .catch((error) => {
+        pushToast(`买入失败: ${error.message}`, "error");
+        setStatus(`模拟买入失败: ${error.message}`);
+      });
     return;
   }
   const row = target.closest("[data-action='view-row'], [data-action='view-search']");
@@ -1866,7 +2261,19 @@ portfolioForm?.addEventListener("submit", (event) => {
     quantity,
     priceMode,
     price: priceMode === "manual" ? manualPrice : null,
-  }).catch((error) => setStatus(`提交模拟单失败: ${error.message}`));
+  }).catch((error) => {
+    pushToast(`提交失败: ${error.message}`, "error");
+    setStatus(`提交模拟单失败: ${error.message}`);
+  });
+});
+
+portfolioSettingsForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  savePortfolioSettings().catch((error) => setStatus(`保存交易设置失败: ${error.message}`));
+});
+
+portfolioPriceMode?.addEventListener("change", () => {
+  syncPortfolioPriceMode();
 });
 
 portfolioResetBtn?.addEventListener("click", () => {
@@ -1874,6 +2281,20 @@ portfolioResetBtn?.addEventListener("click", () => {
     return;
   }
   resetPortfolio().catch((error) => setStatus(`重置模拟盘失败: ${error.message}`));
+});
+
+portfolioExportBtn?.addEventListener("click", () => {
+  exportPortfolio().catch((error) => setStatus(`导出模拟盘失败: ${error.message}`));
+});
+
+portfolioImportBtn?.addEventListener("click", () => {
+  importPortfolio().catch((error) => setStatus(`导入模拟盘失败: ${error.message}`));
+});
+
+portfolioImportFile?.addEventListener("change", () => {
+  if (portfolioImportFile.files?.length) {
+    importPortfolio().catch((error) => setStatus(`导入模拟盘失败: ${error.message}`));
+  }
 });
 
 navItems.forEach((item) => {

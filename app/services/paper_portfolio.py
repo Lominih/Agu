@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 
-from app.core.config import PAPER_PORTFOLIO_PATH
+from app.core.config import PAPER_PORTFOLIO_PATH, PORTFOLIO_DEFAULT_CASH
 from app.services.market_watch import merge_live_and_close, normalize_symbol
 from app.services.state_store import read_json_file, write_json_file
 
@@ -20,11 +21,21 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _normalize_settings(settings: dict[str, Any] | None) -> dict[str, float]:
+    normalized = dict(DEFAULT_SETTINGS)
+    if isinstance(settings, dict):
+        for key, default in DEFAULT_SETTINGS.items():
+            if settings.get(key) is None:
+                continue
+            normalized[key] = max(0.0, _safe_float(settings.get(key), default))
+    return normalized
+
+
 def default_portfolio_state() -> dict[str, Any]:
     return {
         "updated_at": None,
-        "initial_cash": 1_000_000.0,
-        "cash": 1_000_000.0,
+        "initial_cash": PORTFOLIO_DEFAULT_CASH,
+        "cash": PORTFOLIO_DEFAULT_CASH,
         "positions": [],
         "trades": [],
         "settings": dict(DEFAULT_SETTINGS),
@@ -40,12 +51,7 @@ def read_portfolio_state() -> dict[str, Any]:
         base["positions"] = []
     if not isinstance(base.get("trades"), list):
         base["trades"] = []
-    if not isinstance(base.get("settings"), dict):
-        base["settings"] = dict(DEFAULT_SETTINGS)
-    else:
-        settings = dict(DEFAULT_SETTINGS)
-        settings.update(base["settings"])
-        base["settings"] = settings
+    base["settings"] = _normalize_settings(base.get("settings"))
     return base
 
 
@@ -53,6 +59,101 @@ def write_portfolio_state(payload: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(payload)
     enriched["updated_at"] = _now_iso()
     return write_json_file(PAPER_PORTFOLIO_PATH, enriched)
+
+
+def update_portfolio_settings(settings_patch: dict[str, Any]) -> dict[str, Any]:
+    state = read_portfolio_state()
+    settings = dict(state.get("settings") or DEFAULT_SETTINGS)
+    for key in DEFAULT_SETTINGS:
+        if key in settings_patch and settings_patch[key] is not None:
+            settings[key] = settings_patch[key]
+    state["settings"] = _normalize_settings(settings)
+    write_portfolio_state(state)
+    return get_portfolio_snapshot()
+
+
+def export_portfolio_state() -> dict[str, Any]:
+    state = read_portfolio_state()
+    return {
+        "exported_at": _now_iso(),
+        "schema_version": "1.1",
+        "portfolio": state,
+    }
+
+
+def import_portfolio_state(payload: dict[str, Any]) -> dict[str, Any]:
+    portfolio = payload.get("portfolio") if isinstance(payload, dict) and "portfolio" in payload else payload.get("state") if isinstance(payload, dict) and "state" in payload else payload
+    if not isinstance(portfolio, dict):
+        raise ValueError("invalid portfolio payload")
+    merged = default_portfolio_state()
+    merged.update(portfolio)
+    if not isinstance(merged.get("positions"), list):
+        raise ValueError("positions must be a list")
+    if not isinstance(merged.get("trades"), list):
+        raise ValueError("trades must be a list")
+    merged["initial_cash"] = round(_safe_float(merged.get("initial_cash"), 1_000_000.0), 2)
+    merged["cash"] = round(_safe_float(merged.get("cash"), merged["initial_cash"]), 2)
+    merged["settings"] = _normalize_settings(merged.get("settings"))
+    normalized_positions = []
+    for item in merged.get("positions", []):
+        if not isinstance(item, dict):
+            continue
+        symbol = normalize_symbol(item.get("symbol"))
+        quantity = int(_safe_float(item.get("quantity"), 0))
+        if not symbol or quantity <= 0:
+            continue
+        normalized_positions.append(
+            {
+                **item,
+                "symbol": symbol,
+                "name": item.get("name") or symbol,
+                "quantity": quantity,
+                "avg_cost": round(_safe_float(item.get("avg_cost")), 4),
+                "opened_at": item.get("opened_at") or _now_iso(),
+            }
+        )
+    normalized_trades = []
+    for item in merged.get("trades", []):
+        if not isinstance(item, dict):
+            continue
+        symbol = normalize_symbol(item.get("symbol"))
+        quantity = int(_safe_float(item.get("quantity"), 0))
+        if not symbol or quantity <= 0:
+            continue
+        side = str(item.get("side") or "buy").strip().lower()
+        if side not in {"buy", "sell"}:
+            side = "buy"
+        price = round(_safe_float(item.get("price")), 2)
+        requested_price = round(_safe_float(item.get("requested_price"), price), 2)
+        gross_amount = round(_safe_float(item.get("gross_amount"), price * quantity), 2)
+        commission = round(_safe_float(item.get("commission")), 2)
+        stamp_duty = round(_safe_float(item.get("stamp_duty")), 2)
+        fees = round(_safe_float(item.get("fees"), commission + stamp_duty), 2)
+        realized_pnl = round(_safe_float(item.get("realized_pnl")), 2)
+        normalized_trades.append(
+            {
+                **item,
+                "executed_at": item.get("executed_at") or _now_iso(),
+                "symbol": symbol,
+                "name": item.get("name") or symbol,
+                "side": side,
+                "status": item.get("status") or "filled",
+                "quantity": quantity,
+                "requested_price": requested_price,
+                "price": price,
+                "gross_amount": gross_amount,
+                "commission": commission,
+                "stamp_duty": stamp_duty,
+                "fees": fees,
+                "net_amount": round(_safe_float(item.get("net_amount"), gross_amount + fees if side == "buy" else gross_amount - fees), 2),
+                "realized_pnl": realized_pnl,
+                "price_mode": item.get("price_mode") or "live",
+            }
+        )
+    merged["positions"] = normalized_positions
+    merged["trades"] = normalized_trades
+    write_portfolio_state(merged)
+    return get_portfolio_snapshot()
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -74,6 +175,11 @@ def _calculate_stamp_duty(amount: float, side: str, settings: dict[str, Any]) ->
 
 
 def _resolve_trade_price(symbol: str, price: float | None, price_mode: str | None) -> float:
+    normalized_mode = (price_mode or "live").strip().lower()
+    if normalized_mode == "manual":
+        if price is None:
+            raise ValueError("manual price mode requires price")
+        return round(float(price), 2)
     if price is not None:
         return round(float(price), 2)
 
@@ -81,10 +187,18 @@ def _resolve_trade_price(symbol: str, price: float | None, price_mode: str | Non
     if not quotes:
         raise ValueError("unable to resolve trade price")
     quote = quotes[0]
-    candidate = quote.get("price") if (price_mode or "live") == "live" else quote.get("fallback_close") or quote.get("price")
+    candidate = quote.get("price") if normalized_mode == "live" else quote.get("fallback_close") or quote.get("price")
     if candidate is None:
         raise ValueError("trade price unavailable")
     return round(float(candidate), 2)
+
+
+def _apply_slippage(price: float, side: str, settings: dict[str, Any]) -> float:
+    slippage_bps = _safe_float(settings.get("slippage_bps"))
+    if slippage_bps <= 0:
+        return round(price, 2)
+    factor = 1 + slippage_bps / 10000 if side == "buy" else 1 - slippage_bps / 10000
+    return round(price * factor, 2)
 
 
 def _find_position(positions: list[dict[str, Any]], symbol: str) -> dict[str, Any] | None:
@@ -108,6 +222,7 @@ def get_portfolio_snapshot() -> dict[str, Any]:
         if quantity <= 0:
             continue
         avg_cost = round(_safe_float(item.get("avg_cost")), 2)
+        cost_amount = round(avg_cost * quantity, 2)
         quote = quote_map.get(symbol, {})
         current_price = _safe_float(quote.get("price") or quote.get("fallback_close"), avg_cost)
         position_value = round(current_price * quantity, 2)
@@ -119,16 +234,29 @@ def get_portfolio_snapshot() -> dict[str, Any]:
                 **item,
                 "symbol": symbol,
                 "avg_cost": avg_cost,
+                "cost_amount": cost_amount,
                 "current_price": round(current_price, 2),
                 "market_value": position_value,
                 "unrealized_pnl": pnl,
+                "weight_pct": 0.0,
                 "quote": quote,
             }
         )
 
-    realized_pnl = round(sum(_safe_float(item.get("realized_pnl")) for item in state.get("trades", [])), 2)
+    trades = list(state.get("trades", []))
+    realized_pnl = round(sum(_safe_float(item.get("realized_pnl")) for item in trades), 2)
     cash = round(_safe_float(state.get("cash")), 2)
     equity = round(cash + market_value, 2)
+    buy_count = sum(1 for item in trades if str(item.get("side") or "").strip().lower() == "buy")
+    sell_count = sum(1 for item in trades if str(item.get("side") or "").strip().lower() == "sell")
+    closed_trades = [item for item in trades if str(item.get("side") or "").strip().lower() == "sell"]
+    winning_trade_count = sum(1 for item in closed_trades if _safe_float(item.get("realized_pnl")) > 0)
+    losing_trade_count = sum(1 for item in closed_trades if _safe_float(item.get("realized_pnl")) < 0)
+    win_rate_pct = round(winning_trade_count / len(closed_trades) * 100, 2) if closed_trades else 0.0
+    avg_fee_per_trade = round(sum(_safe_float(item.get("fees")) for item in trades) / len(trades), 2) if trades else 0.0
+
+    for item in snapshot_positions:
+        item["weight_pct"] = round(item["market_value"] / equity * 100, 2) if equity else 0.0
 
     return {
         "updated_at": state.get("updated_at"),
@@ -138,9 +266,21 @@ def get_portfolio_snapshot() -> dict[str, Any]:
         "equity": equity,
         "realized_pnl": realized_pnl,
         "unrealized_pnl": round(unrealized_pnl, 2),
+        "position_count": len(snapshot_positions),
+        "cash_ratio": round(cash / equity, 4) if equity else 0.0,
+        "position_ratio": round(market_value / equity, 4) if equity else 0.0,
+        "cash_ratio_pct": round(cash / equity * 100, 2) if equity else 0.0,
+        "position_ratio_pct": round(market_value / equity * 100, 2) if equity else 0.0,
+        "total_fees": round(sum(_safe_float(item.get("fees")) for item in trades), 2),
+        "average_fee_per_trade": avg_fee_per_trade,
+        "trade_count": len(trades),
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+        "winning_trade_count": winning_trade_count,
+        "losing_trade_count": losing_trade_count,
+        "win_rate_pct": win_rate_pct,
         "positions": sorted(snapshot_positions, key=lambda item: item.get("symbol", "")),
-        "recent_trades": list(reversed(state.get("trades", [])[-20:])),
-        "trade_count": len(state.get("trades", [])),
+        "recent_trades": list(reversed(trades[-20:])),
         "settings": state.get("settings", dict(DEFAULT_SETTINGS)),
     }
 
@@ -166,7 +306,8 @@ def place_order(
 
     state = read_portfolio_state()
     settings = state.get("settings", dict(DEFAULT_SETTINGS))
-    trade_price = _resolve_trade_price(normalized_symbol, price=price, price_mode=price_mode)
+    requested_price = _resolve_trade_price(normalized_symbol, price=price, price_mode=price_mode)
+    trade_price = _apply_slippage(requested_price, normalized_side, settings)
     gross_amount = round(trade_price * normalized_quantity, 2)
     commission = _calculate_commission(gross_amount, settings)
     stamp_duty = _calculate_stamp_duty(gross_amount, normalized_side, settings)
@@ -215,7 +356,9 @@ def place_order(
         "symbol": normalized_symbol,
         "name": name or (position.get("name") if position else normalized_symbol) or normalized_symbol,
         "side": normalized_side,
+        "status": "filled",
         "quantity": normalized_quantity,
+        "requested_price": requested_price,
         "price": trade_price,
         "gross_amount": gross_amount,
         "commission": commission,

@@ -12,7 +12,15 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.core.config import DEFAULT_MODEL_PATH, REAL_DATA_PATH, REFRESH_LOG_PATH  # noqa: E402
-from app.services.dataset import FEATURE_COLUMNS, build_features, fetch_real_dataset, load_index_constituents  # noqa: E402
+from app.services.dataset import (  # noqa: E402
+    FEATURE_COLUMNS,
+    build_features,
+    fetch_real_dataset,
+    get_data_health_report,
+    get_incremental_start_date,
+    load_price_data,
+    load_index_constituents,
+)
 from app.services.model_state import write_model_meta  # noqa: E402
 from app.services.modeling import train_model  # noqa: E402
 from app.services.refresh_status import read_refresh_status, utc_now_iso, write_refresh_status  # noqa: E402
@@ -50,13 +58,26 @@ def main() -> int:
 
     try:
         symbols = load_index_constituents(args.pool)
-        prices = fetch_real_dataset(
+        existing_prices = load_price_data(REAL_DATA_PATH, source="real", allow_remote_fetch=False) if REAL_DATA_PATH.exists() else None
+        effective_start_date = get_incremental_start_date(REAL_DATA_PATH, default_start_date=args.start_date)
+        fetched_prices = fetch_real_dataset(
             REAL_DATA_PATH,
             symbols=symbols,
-            start_date=args.start_date,
+            start_date=effective_start_date,
             pool=args.pool,
             max_workers=args.workers,
         )
+        if existing_prices is not None and not existing_prices.empty:
+            prices = (
+                fetched_prices.pipe(lambda frame: __import__("pandas").concat([existing_prices, frame], ignore_index=True))
+                .drop_duplicates(subset=["symbol", "date"], keep="last")
+                .sort_values(["symbol", "date"])
+                .reset_index(drop=True)
+            )
+            prices.to_csv(REAL_DATA_PATH, index=False, encoding="utf-8-sig")
+        else:
+            prices = fetched_prices
+        health = get_data_health_report(prices)
         features = build_features(prices)
         metrics = train_model(features, DEFAULT_MODEL_PATH)
         write_model_meta(
@@ -76,7 +97,10 @@ def main() -> int:
                 "message": "真实 A 股数据刷新完成，模型训练完成",
                 "rows": int(len(prices)),
                 "symbols": int(prices["symbol"].nunique()),
+                "start_date": effective_start_date,
                 "metrics": metrics,
+                "data_health": health,
+                "model_version": f"{args.pool}-{effective_start_date}",
                 "error": None,
                 "finished_at": utc_now_iso(),
                 "log_path": str(REFRESH_LOG_PATH),

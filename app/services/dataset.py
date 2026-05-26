@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,8 @@ import akshare as ak
 import numpy as np
 import pandas as pd
 
-from app.core.config import DEFAULT_SAMPLE_SYMBOLS, INDEX_POOLS
+from app.core.config import DATA_HEALTH_PATH, DATASET_META_PATH, DEFAULT_SAMPLE_SYMBOLS, INDEX_POOLS
+from app.services.state_store import read_json_file, write_json_file
 
 
 FEATURE_COLUMNS = [
@@ -61,6 +63,16 @@ def generate_sample_dataset(output_path: Path) -> pd.DataFrame:
     df = pd.DataFrame(rows).sort_values(["symbol", "date"]).reset_index(drop=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    write_dataset_meta(
+        {
+            "source": "sample",
+            "pool": "sample",
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "rows": int(len(df)),
+            "symbols": int(df["symbol"].nunique()),
+            "latest_date": pd.Timestamp(df["date"].max()).strftime("%Y-%m-%d"),
+        }
+    )
     return df
 
 
@@ -84,7 +96,12 @@ def load_index_constituents(pool: str = "hs300") -> list[tuple[str, str]]:
 
 def _fetch_one_symbol(symbol: str, name: str, start_ts: pd.Timestamp, pool: str) -> pd.DataFrame:
     exchange_symbol = ("sh" if symbol.startswith(("600", "601", "603", "605", "688")) else "sz") + symbol
-    hist = ak.stock_zh_a_daily(symbol=exchange_symbol, adjust="qfq")
+    hist = ak.stock_zh_a_daily(
+        symbol=exchange_symbol,
+        start_date=start_ts.strftime("%Y%m%d"),
+        end_date=(pd.Timestamp(datetime.now().date()) + pd.Timedelta(days=1)).strftime("%Y%m%d"),
+        adjust="qfq",
+    )
     base_columns = ["date", "open", "high", "low", "close", "volume"]
     available_columns = [column for column in base_columns if column in hist.columns]
     frame = hist[available_columns].copy()
@@ -133,7 +150,116 @@ def fetch_real_dataset(
     df = pd.concat(frames, ignore_index=True).sort_values(["symbol", "date"]).reset_index(drop=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
+    write_dataset_meta(
+        {
+            "source": "akshare",
+            "pool": pool,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "rows": int(len(df)),
+            "symbols": int(df["symbol"].nunique()),
+            "latest_date": pd.Timestamp(df["date"].max()).strftime("%Y-%m-%d"),
+        }
+    )
     return df
+
+
+def get_incremental_start_date(existing_path: Path, default_start_date: str = "2023-01-01", overlap_days: int = 20) -> str:
+    if not existing_path.exists():
+        return default_start_date
+    try:
+        existing = pd.read_csv(existing_path, usecols=["date"], parse_dates=["date"])
+    except Exception:
+        return default_start_date
+    if existing.empty:
+        return default_start_date
+    latest_date = pd.Timestamp(existing["date"].max()).normalize()
+    incremental_start = latest_date - pd.Timedelta(days=overlap_days)
+    default_ts = pd.Timestamp(default_start_date)
+    return max(default_ts, incremental_start).strftime("%Y-%m-%d")
+
+
+def read_dataset_meta() -> dict[str, Any]:
+    meta = read_json_file(DATASET_META_PATH, default_factory=lambda: {}) or {}
+    if not isinstance(meta, dict):
+        return {}
+    return meta
+
+
+def write_dataset_meta(payload: dict[str, Any]) -> dict[str, Any]:
+    return write_json_file(DATASET_META_PATH, payload)
+
+
+def get_data_health_report(df: pd.DataFrame | None = None) -> dict[str, Any]:
+    working = df.copy() if df is not None else None
+    issues: list[str] = []
+    summary = {"rows": 0, "symbols": 0, "latest_date": None, "missing_columns": [], "stale_days": None}
+
+    if working is None:
+        meta = read_dataset_meta()
+        if meta:
+            summary.update(
+                {
+                    "rows": int(meta.get("rows") or 0),
+                    "symbols": int(meta.get("symbols") or 0),
+                    "latest_date": meta.get("latest_date"),
+                }
+            )
+        health = {"status": "unknown", "summary": summary, "issues": issues, "updated_at": datetime.now().isoformat(timespec="seconds")}
+        write_json_file(DATA_HEALTH_PATH, health)
+        return health
+
+    working = working.copy()
+    summary["rows"] = int(len(working))
+    summary["symbols"] = int(working["symbol"].nunique()) if "symbol" in working.columns else 0
+    summary["latest_date"] = pd.Timestamp(working["date"].max()).strftime("%Y-%m-%d") if "date" in working.columns and not working.empty else None
+
+    required_columns = {"date", "symbol", "name", "close", "volume", "source", "pool"}
+    missing_columns = sorted(required_columns - set(working.columns))
+    summary["missing_columns"] = missing_columns
+    if missing_columns:
+        issues.append(f"缺少字段: {', '.join(missing_columns)}")
+
+    if "date" in working.columns and not working.empty:
+        latest_date = pd.Timestamp(working["date"].max())
+        stale_days = (pd.Timestamp(datetime.now().date()) - latest_date.normalize()).days
+        summary["stale_days"] = int(stale_days)
+        if stale_days > 7:
+            issues.append(f"数据已超过 {stale_days} 天未更新")
+
+    if "close" in working.columns and not working.empty:
+        close_series = pd.to_numeric(working["close"], errors="coerce")
+        if close_series.isna().any():
+            issues.append("存在无效收盘价")
+        if (close_series <= 0).any():
+            issues.append("存在非正价格")
+
+    if "volume" in working.columns and not working.empty:
+        volume_series = pd.to_numeric(working["volume"], errors="coerce")
+        if (volume_series < 0).any():
+            issues.append("存在负成交量")
+
+    if "symbol" in working.columns and "date" in working.columns:
+        dup_count = int(working.duplicated(subset=["symbol", "date"]).sum())
+        if dup_count:
+            issues.append(f"存在 {dup_count} 条重复日线记录")
+
+    status = "healthy" if not issues else "warn"
+    health = {"status": status, "summary": summary, "issues": issues, "updated_at": datetime.now().isoformat(timespec="seconds")}
+    write_json_file(DATA_HEALTH_PATH, health)
+    return health
+
+
+def incremental_merge_dataset(existing_path: Path, incoming: pd.DataFrame) -> pd.DataFrame:
+    if not existing_path.exists():
+        return incoming
+    try:
+        existing = pd.read_csv(existing_path, parse_dates=["date"], dtype={"symbol": str, "name": str, "source": str, "pool": str})
+    except Exception:
+        return incoming
+    merged = pd.concat([existing, incoming], ignore_index=True)
+    merged["symbol"] = merged["symbol"].astype(str).str.zfill(6)
+    merged = merged.drop_duplicates(subset=["symbol", "date"], keep="last").sort_values(["symbol", "date"]).reset_index(drop=True)
+    return merged
 
 
 def load_price_data(

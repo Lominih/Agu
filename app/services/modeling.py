@@ -101,6 +101,26 @@ def _basis_text(feature: str, value: float, contribution: float) -> str:
     return f"{FEATURE_LABELS.get(feature, feature)} { _format_feature_value(feature, value) }，贡献 { _format_contribution_value(contribution) }"
 
 
+def _confidence_label(score: float | None) -> str:
+    if score is None or pd.isna(score):
+        return "未知"
+    if score >= 0.75:
+        return "高"
+    if score >= 0.55:
+        return "中"
+    return "低"
+
+
+def _risk_label(score: float | None) -> str:
+    if score is None or pd.isna(score):
+        return "未知"
+    if score >= 0.7:
+        return "高"
+    if score >= 0.45:
+        return "中"
+    return "低"
+
+
 def build_pick_explanations(model: LGBMRegressor, ranked_df: pd.DataFrame) -> pd.DataFrame:
     explained = ranked_df.copy().reset_index(drop=True)
     if explained.empty:
@@ -109,6 +129,10 @@ def build_pick_explanations(model: LGBMRegressor, ranked_df: pd.DataFrame) -> pd
         explained["reason_texts"] = []
         explained["basis_items"] = []
         explained["risk_texts"] = []
+        explained["confidence_score"] = []
+        explained["confidence_label"] = []
+        explained["risk_score"] = []
+        explained["risk_level"] = []
         return explained
 
     contributions = model.predict(explained[FEATURE_COLUMNS], pred_contrib=True)
@@ -116,12 +140,19 @@ def build_pick_explanations(model: LGBMRegressor, ranked_df: pd.DataFrame) -> pd
     if contribution_array.ndim == 1:
         contribution_array = contribution_array.reshape(1, -1)
     feature_contributions = contribution_array[:, : len(FEATURE_COLUMNS)]
+    predicted_rank = explained["predicted_return_5"].rank(pct=True, method="average") if "predicted_return_5" in explained.columns else pd.Series([0.5] * len(explained), index=explained.index)
+    volatility_rank = explained["volatility_20"].rank(pct=True, method="average") if "volatility_20" in explained.columns else pd.Series([0.5] * len(explained), index=explained.index)
+    drawdown_rank = explained["drawdown_20"].rank(pct=True, method="average") if "drawdown_20" in explained.columns else pd.Series([0.5] * len(explained), index=explained.index)
 
     reason_summaries: list[str] = []
     reason_tags_list: list[list[str]] = []
     reason_texts_list: list[list[str]] = []
     basis_items_list: list[list[dict[str, Any]]] = []
     risk_texts_list: list[list[str]] = []
+    confidence_scores: list[float] = []
+    confidence_labels: list[str] = []
+    risk_scores: list[float] = []
+    risk_levels: list[str] = []
 
     for row_index, (_, row) in enumerate(explained.iterrows()):
         feature_items: list[dict[str, Any]] = []
@@ -167,12 +198,38 @@ def build_pick_explanations(model: LGBMRegressor, ranked_df: pd.DataFrame) -> pd
         reason_texts_list.append(reason_texts)
         basis_items_list.append(basis_items)
         risk_texts_list.append(risk_texts)
+        confidence_score = float(
+            min(
+                0.98,
+                max(
+                    0.05,
+                    0.55 * float(predicted_rank.iloc[row_index]) + 0.25 * (1.0 - float(volatility_rank.iloc[row_index])) + 0.20 * float(predicted_rank.iloc[row_index]),
+                ),
+            )
+        )
+        risk_score = float(
+            min(
+                0.98,
+                max(
+                    0.02,
+                    0.60 * float(volatility_rank.iloc[row_index]) + 0.40 * (1.0 - float(drawdown_rank.iloc[row_index])),
+                ),
+            )
+        )
+        confidence_scores.append(confidence_score)
+        confidence_labels.append(_confidence_label(confidence_score))
+        risk_scores.append(risk_score)
+        risk_levels.append(_risk_label(risk_score))
 
     explained["reason_summary"] = reason_summaries
     explained["reason_tags"] = reason_tags_list
     explained["reason_texts"] = reason_texts_list
     explained["basis_items"] = basis_items_list
     explained["risk_texts"] = risk_texts_list
+    explained["confidence_score"] = confidence_scores
+    explained["confidence_label"] = confidence_labels
+    explained["risk_score"] = risk_scores
+    explained["risk_level"] = risk_levels
     return explained
 
 
@@ -217,6 +274,98 @@ def build_backtest_summary(test_df: pd.DataFrame, predictions: np.ndarray, top_n
     }
 
 
+def build_rolling_backtest_summary(feature_df: pd.DataFrame, top_n: int = 10) -> dict[str, Any]:
+    ordered = feature_df.sort_values("date").reset_index(drop=True)
+    if ordered.empty:
+        return {
+            "days": 0,
+            "top_n": top_n,
+            "annualized_return": None,
+            "max_drawdown": None,
+            "sharpe": None,
+            "ic": None,
+            "rank_ic": None,
+        }
+
+    split_index = int(len(ordered) * 0.7)
+    train_df = ordered.iloc[:split_index].copy()
+    test_df = ordered.iloc[split_index:].copy()
+    if test_df.empty or train_df.empty:
+        return {
+            "days": 0,
+            "top_n": top_n,
+            "annualized_return": None,
+            "max_drawdown": None,
+            "sharpe": None,
+            "ic": None,
+            "rank_ic": None,
+        }
+
+    model = LGBMRegressor(
+        n_estimators=180,
+        learning_rate=0.05,
+        max_depth=5,
+        num_leaves=31,
+        min_child_samples=24,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        random_state=42,
+    )
+    model.fit(train_df[FEATURE_COLUMNS], train_df["future_return_5"])
+    test_df = test_df.copy()
+    test_df["predicted_return_5"] = model.predict(test_df[FEATURE_COLUMNS])
+
+    daily_returns: list[float] = []
+    ic_values: list[float] = []
+    rank_ic_values: list[float] = []
+    for _, day_frame in test_df.groupby("date"):
+        ranked = day_frame.sort_values("predicted_return_5", ascending=False)
+        picked = ranked.head(min(top_n, len(ranked)))
+        if not picked.empty:
+            daily_returns.append(float(picked["future_return_5"].mean()))
+        if day_frame["predicted_return_5"].nunique() > 1 and day_frame["future_return_5"].nunique() > 1:
+            ic = day_frame["predicted_return_5"].corr(day_frame["future_return_5"])
+            rank_ic = day_frame["predicted_return_5"].rank().corr(day_frame["future_return_5"].rank())
+            if pd.notna(ic):
+                ic_values.append(float(ic))
+            if pd.notna(rank_ic):
+                rank_ic_values.append(float(rank_ic))
+
+    if not daily_returns:
+        return {
+            "days": 0,
+            "top_n": top_n,
+            "annualized_return": None,
+            "max_drawdown": None,
+            "sharpe": None,
+            "ic": None,
+            "rank_ic": None,
+        }
+
+    returns_series = pd.Series(daily_returns, dtype=float)
+    equity_curve = (1 + returns_series).cumprod()
+    running_peak = equity_curve.cummax()
+    drawdown = equity_curve / running_peak - 1
+    sharpe = None
+    if returns_series.std(ddof=0) > 0:
+        sharpe = float((returns_series.mean() / returns_series.std(ddof=0)) * np.sqrt(252 / 5))
+    annualized_return = float(equity_curve.iloc[-1] ** (252 / max(len(returns_series) * 5, 1)) - 1)
+
+    return {
+        "days": int(len(returns_series)),
+        "top_n": int(top_n),
+        "annualized_return": annualized_return,
+        "max_drawdown": float(drawdown.min()) if not drawdown.empty else None,
+        "sharpe": sharpe,
+        "ic": float(np.mean(ic_values)) if ic_values else None,
+        "rank_ic": float(np.mean(rank_ic_values)) if rank_ic_values else None,
+    }
+
+
+def _compute_rmse(actual: pd.Series | np.ndarray, predicted: np.ndarray) -> float:
+    return float(np.sqrt(mean_squared_error(actual, predicted)))
+
+
 def train_model(feature_df: pd.DataFrame, output_path: Path) -> dict[str, Any]:
     ordered = feature_df.sort_values("date").reset_index(drop=True)
     cutoff_index = int(len(ordered) * 0.8)
@@ -241,13 +390,14 @@ def train_model(feature_df: pd.DataFrame, output_path: Path) -> dict[str, Any]:
     train_score = float(model.score(train_df[FEATURE_COLUMNS], train_df["future_return_5"]))
     test_score = float(model.score(test_df[FEATURE_COLUMNS], test_df["future_return_5"])) if not test_df.empty else train_score
     test_mae = float(mean_absolute_error(test_df["future_return_5"], test_predictions)) if not test_df.empty else float(mean_absolute_error(train_df["future_return_5"], train_predictions))
-    test_rmse = float(mean_squared_error(test_df["future_return_5"], test_predictions, squared=False)) if not test_df.empty else float(mean_squared_error(train_df["future_return_5"], train_predictions, squared=False))
+    test_rmse = _compute_rmse(test_df["future_return_5"], test_predictions) if not test_df.empty else _compute_rmse(train_df["future_return_5"], train_predictions)
     direction_accuracy = (
         float(((test_predictions > 0) == (test_df["future_return_5"].to_numpy() > 0)).mean())
         if not test_df.empty
         else float(((train_predictions > 0) == (train_df["future_return_5"].to_numpy() > 0)).mean())
     )
     backtest = build_backtest_summary(test_df if not test_df.empty else train_df, test_predictions if not test_df.empty else train_predictions, top_n=10)
+    rolling_backtest = build_rolling_backtest_summary(feature_df, top_n=10)
     feature_importances = [
         {"feature": feature, "label": FEATURE_LABELS.get(feature, feature), "importance": float(importance)}
         for feature, importance in sorted(zip(FEATURE_COLUMNS, model.feature_importances_, strict=True), key=lambda item: item[1], reverse=True)
@@ -266,6 +416,7 @@ def train_model(feature_df: pd.DataFrame, output_path: Path) -> dict[str, Any]:
         "test_rmse": test_rmse,
         "direction_accuracy": direction_accuracy,
         "backtest": backtest,
+        "rolling_backtest": rolling_backtest,
         "feature_importances": feature_importances,
     }
 
