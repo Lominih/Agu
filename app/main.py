@@ -410,7 +410,7 @@ def rotation() -> dict:
     market = get_market_overview(limit=8)
     return {
         "updated_at": market.get("updated_at"),
-        "items": market.get("us_industry_leaders") or [],
+        "items": market.get("a_share_rotation") or [],
     }
 
 
@@ -433,21 +433,152 @@ def prepost() -> dict:
     }
 
 
-@app.get("/api/timeline/{symbol}")
-def timeline(symbol: str) -> dict:
-    payload = build_history_payload(symbol, period="day", limit=30)
-    events = []
-    for item in payload.get("items", [])[-10:]:
-        events.append(
-            {
-                "date": item.get("date"),
-                "title": f"{payload.get('name') or symbol} 价格回看",
-                "body": f"收盘 {item.get('close')}，涨跌幅 {item.get('change_pct')}%",
-                "tone": "positive" if (item.get("change_pct") or 0) >= 0 else "negative",
-            }
-        )
-    return {"symbol": symbol, "items": events}
+@app.get("/api/stock-info/{symbol}")
+def stock_info(symbol: str) -> dict:
+    hist = build_history_payload(symbol, period="day", limit=5)
+    items = hist.get("items", [])
+    name = hist.get("name") or symbol
+    last = items[-1] if items else {}
+    prev = items[-2] if len(items) >= 2 else {}
+    price = last.get("close")
+    prev_close = prev.get("close")
+    change_pct = None
+    if price and prev_close and float(prev_close) != 0:
+        change_pct = round((float(price) / float(prev_close) - 1) * 100, 2)
+    return {
+        "symbol": symbol,
+        "name": name,
+        "price": price,
+        "change_pct": change_pct,
+        "date": last.get("date"),
+    }
 
+
+@app.get("/api/stock-analysis/{symbol}")
+def stock_analysis(symbol: str) -> dict:
+    import statistics
+
+    hist = build_history_payload(symbol, period="day", limit=60)
+    name = hist.get("name") or symbol
+    items = hist.get("items", [])
+    close_prices = [float(it.get("close", 0)) for it in items if it.get("close")]
+
+    # Recent returns
+    def _ret(n):
+        if len(close_prices) >= n + 1 and close_prices[-n - 1] != 0:
+            return round((close_prices[-1] / close_prices[-n - 1] - 1) * 100, 2)
+        return None
+
+    ret_5, ret_10, ret_20 = _ret(5), _ret(10), _ret(20)
+    current_price = close_prices[-1] if close_prices else None
+
+    # Volatility
+    daily_changes = []
+    for i in range(1, len(close_prices)):
+        if close_prices[i - 1] != 0:
+            daily_changes.append((close_prices[i] / close_prices[i - 1] - 1) * 100)
+    volatility = round(statistics.stdev(daily_changes), 2) if len(daily_changes) > 1 else None
+
+    # Trend
+    trend = "flat"
+    if len(close_prices) >= 10:
+        ma5 = sum(close_prices[-5:]) / 5
+        ma10 = sum(close_prices[-10:]) / 10
+        if close_prices[-1] > ma5 > ma10:
+            trend = "up"
+        elif close_prices[-1] < ma5 < ma10:
+            trend = "down"
+
+    # Check model picks
+    model_signal = None
+    try:
+        model = load_model()
+        if model is not None:
+            snapshot = build_scoring_frame()
+            if snapshot is not None:
+                ranked = score_snapshot(model, snapshot)
+                ranked = build_pick_explanations(model, ranked)
+                match = ranked[ranked["symbol"] == symbol] if "symbol" in ranked.columns else ranked.head(0)
+                if not match.empty:
+                    row = match.iloc[0]
+                    model_signal = {
+                        "rank": int(row.get("rank", 0)),
+                        "predicted_return": float(row.get("predicted_return", 0)),
+                        "reason": str(row.get("explanation", "")),
+                        "confidence": str(row.get("confidence", "")),
+                    }
+    except Exception:
+        pass
+
+    # Hot news
+    news_items = []
+    try:
+        hot = get_hot_news(limit=20, category="all")
+        for item in hot.get("items", []):
+            title = str(item.get("title", ""))
+            if name in title or symbol in title or (name and len(name) >= 2 and name[:2] in title):
+                news_items.append({
+                    "title": title,
+                    "time": item.get("published_at", ""),
+                    "summary": item.get("ai_summary") or item.get("summary", ""),
+                    "tone": item.get("ai_tone", "neutral"),
+                })
+    except Exception:
+        pass
+
+    # Bullish / bearish signals
+    bullish, bearish = [], []
+    if trend == "up":
+        bullish.append("均线多头排列，短期趋势向上")
+    elif trend == "down":
+        bearish.append("均线空头排列，短期趋势向下")
+
+    if ret_5 is not None:
+        if ret_5 > 3:
+            bullish.append(f"近5日涨幅{ret_5}%，短期动能强")
+        elif ret_5 < -3:
+            bearish.append(f"近5日跌幅{ret_5}%，短期承压")
+
+    if volatility is not None:
+        if volatility > 3:
+            bearish.append(f"日均波动{volatility}%，风险偏高")
+        elif volatility < 1.5:
+            bullish.append(f"日均波动{volatility}%，走势平稳")
+
+    if model_signal:
+        if model_signal.get("predicted_return", 0) > 1:
+            bullish.append(f"模型预测未来5日涨{model_signal['predicted_return']}%")
+        elif model_signal.get("predicted_return", 0) < -1:
+            bearish.append(f"模型预测未来5日跌{model_signal['predicted_return']}%")
+
+    if not bullish:
+        bullish.append("暂无明显利好信号")
+    if not bearish:
+        bearish.append("暂无明显利空信号")
+
+    # Price history for chart
+    price_items = []
+    for it in items[-30:]:
+        price_items.append({
+            "date": it.get("date"),
+            "close": it.get("close"),
+            "change_pct": it.get("change_pct"),
+        })
+
+    return {
+        "symbol": symbol,
+        "name": name,
+        "current_price": current_price,
+        "trend": trend,
+        "volatility": volatility,
+        "returns": {"5d": ret_5, "10d": ret_10, "20d": ret_20},
+        "bullish": bullish,
+        "bearish": bearish,
+        "model_signal": model_signal,
+        "related_news": news_items,
+        "price_history": price_items,
+        "updated_at": _now_iso() if "_now_iso" in dir() else None,
+    }
 
 @app.get("/api/alerts")
 def alerts() -> dict:

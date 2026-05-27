@@ -34,7 +34,6 @@ const marketOpen = document.querySelector("#marketOpen");
 const marketCurrent = document.querySelector("#marketCurrent");
 const marketChange = document.querySelector("#marketChange");
 const marketChangePct = document.querySelector("#marketChangePct");
-const homeUsLeaderList = document.querySelector("#homeUsLeaderList");
 const hotNewsList = document.querySelector("#hotNewsList");
 const hotNewsScroll = hotNewsList?.closest(".hot-news-scroll");
 const hotNewsPageMeta = document.querySelector("#hotNewsPageMeta");
@@ -75,7 +74,7 @@ const portfolioSlippageBps = document.querySelector("#portfolioSlippageBps");
 const screenList = document.querySelector("#screenList");
 const rotationList = document.querySelector("#rotationList");
 const prepostList = document.querySelector("#prepostList");
-const timelineList = document.querySelector("#timelineList");
+const stockAnalysisResult = document.querySelector("#stockAnalysisResult");
 const timelineSymbolInput = document.querySelector("#timelineSymbolInput");
 const alertsList = document.querySelector("#alertsList");
 const toastStack = document.querySelector("#toastStack");
@@ -1302,29 +1301,6 @@ function renderMarketOverview(payload) {
     marketNasdaqCard.classList.remove("market-up", "market-down", "market-flat");
     marketNasdaqCard.classList.add(getToneClassName(normalizedPayload?.nasdaq_previous?.change_pct));
   }
-  if (homeUsLeaderList instanceof HTMLElement) {
-    const items = normalizedPayload?.us_industry_leaders || normalizedPayload?.us_sector_leaders || [];
-    homeUsLeaderList.innerHTML = items.length
-      ? items
-          .map((item) => {
-            const extraParts = [];
-            if (item.trade_date) extraParts.push(item.trade_date);
-            if (item.leader_name) extraParts.push(`领涨股 ${escapeHtml(item.leader_name)} ${formatSignedPercent(item.leader_change_pct)}`);
-            if (item.stocks != null) extraParts.push(`${item.stocks} 只样本股`);
-            return `
-              <div class="market-sector-row">
-                <div class="market-sector-rank">${item.stocks ?? "-"}</div>
-                <div class="market-sector-main">
-                  <div class="market-sector-name">${escapeHtml(item.name)}</div>
-                  <div class="market-sector-extra">${extraParts.join(" | ") || "-"}</div>
-                </div>
-                <div class="market-sector-change ${getToneClassName(item.change_pct)}">${formatSignedPercent(item.change_pct)}</div>
-              </div>
-            `;
-          })
-          .join("")
-      : `<div class="placeholder-row">暂无美股行业数据</div>`;
-  }
 }
 
 function syncHotNewsFilterButton() {
@@ -1614,12 +1590,12 @@ function renderRotation(payload) {
   rotationList.innerHTML = items.length
     ? items
         .map(
-          (item) => `
+          (item, idx) => `
             <div class="market-sector-row">
-              <div class="market-sector-rank">${item.stocks ?? "-"}</div>
+              <div class="market-sector-rank">${idx + 1}</div>
               <div class="market-sector-main">
                 <div class="market-sector-name">${escapeHtml(item.name || "-")}</div>
-                <div class="market-sector-extra">${escapeHtml(item.leader_name || "-")}</div>
+                <div class="market-sector-extra">${escapeHtml(item.leader_name || "-")}${item.leader_change_pct != null ? " (" + formatSignedPercent(item.leader_change_pct) + ")" : ""} | ↑${item.up_count ?? 0} ↓${item.down_count ?? 0}</div>
               </div>
               <div class="market-sector-change ${getToneClassName(item.change_pct)}">${formatSignedPercent(item.change_pct)}</div>
             </div>
@@ -1651,26 +1627,82 @@ function renderPrePost(payload) {
     : `<div class="placeholder-row">暂无盘前盘后内容</div>`;
 }
 
-function renderTimeline(payload) {
-  const items = Array.isArray(payload?.items) ? payload.items : [];
-  if (!(timelineList instanceof HTMLElement)) return;
-  timelineList.innerHTML = items.length
-    ? items
-        .map(
-          (item) => `
-            <div class="brief-item">
-              <div class="brief-side">
-                <div class="brief-time">${escapeHtml(item.date || "-")}</div>
-                <div class="brief-ai ${item.tone === "positive" ? "news-positive" : "news-negative"}">${escapeHtml(item.title || "-")}</div>
-              </div>
-              <div class="brief-main">
-                <div class="brief-summary">${escapeHtml(item.body || "-")}</div>
-              </div>
-            </div>
-          `
-        )
-        .join("")
-    : `<div class="placeholder-row">输入代码后查看时间线</div>`;
+function renderStockAnalysis(payload) {
+  console.log("[Analysis] called, element:", !!stockAnalysisResult, "payload:", payload?.symbol, "returns:", payload?.returns);
+  if (!(stockAnalysisResult instanceof HTMLElement)) { console.log("[Analysis] no element"); return; }
+  if (!payload || !payload.symbol) {
+    stockAnalysisResult.innerHTML = '<div class="placeholder-row">输入代码后查看分析</div>';
+    return;
+  }
+  var ret = payload.returns || {};
+  console.log('[Analysis] ret:', JSON.stringify(ret));
+  var trendMap = {up: '上升趋势', down: '下降趋势', flat: '横盘整理'};
+  var trendClassMap = {up: 'news-positive', down: 'news-negative', flat: 'news-neutral'};
+  var trendLabel = trendMap[payload.trend] || '未知';
+  var trendClass = trendClassMap[payload.trend] || '';
+
+  var bullishHtml = (payload.bullish || []).map(function(b) {
+    return '<div class="signal-item signal-bullish">' + escapeHtml(b) + '</div>';
+  }).join('');
+  var bearishHtml = (payload.bearish || []).map(function(b) {
+    return '<div class="signal-item signal-bearish">' + escapeHtml(b) + '</div>';
+  }).join('');
+
+  var newsHtml = '';
+  if (payload.related_news && payload.related_news.length) {
+    newsHtml = payload.related_news.map(function(n) {
+      var toneCls = n.tone === 'positive' ? 'news-positive' : (n.tone === 'negative' ? 'news-negative' : 'news-neutral');
+      return '<div class="brief-item"><div class="brief-side"><div class="brief-time">' + escapeHtml(n.time || '') + '</div><div class="brief-ai ' + toneCls + '">' + escapeHtml(n.title || '') + '</div></div><div class="brief-main"><div class="brief-summary">' + escapeHtml(n.summary || '') + '</div></div></div>';
+    }).join('');
+  } else {
+    newsHtml = '<div class="placeholder-row" style="padding:8px">暂无相关新闻</div>';
+  }
+
+  var modelHtml = '';
+  if (payload.model_signal) {
+    var ms = payload.model_signal;
+    var msTone = ms.predicted_return > 0 ? 'news-positive' : 'news-negative';
+    modelHtml = '<div class="analysis-card"><div class="analysis-card-title">模型信号</div><div class="analysis-card-body">'
+      + '<div class="model-signal-row"><span>预测排名</span><span class="analysis-value">#' + ms.rank + '</span></div>'
+      + '<div class="model-signal-row"><span>预测5日收益</span><span class="analysis-value ' + msTone + '">' + formatSignedPercent(ms.predicted_return) + '</span></div>'
+      + (ms.reason ? '<div class="model-signal-reason">' + escapeHtml(ms.reason) + '</div>' : '')
+      + '</div></div>';
+  } else {
+    modelHtml = '<div class="analysis-card"><div class="analysis-card-title">模型信号</div><div class="analysis-card-body"><div class="placeholder-row" style="padding:4px">该股票不在模型候选池中</div></div></div>';
+  }
+
+  var retRow = function(label, val) {
+    return '<div class="return-row"><span>' + label + '</span><span class="' + getToneClassName(val) + '">' + formatSignedPercent(val) + '</span></div>';
+  };
+
+  var headerHtml = '<div class="analysis-header"><div class="analysis-stock-name">' + escapeHtml(payload.name || payload.symbol) + ' <span class="analysis-symbol">' + escapeHtml(payload.symbol) + '</span></div>'
+    + (payload.current_price != null ? '<div class="analysis-price">' + payload.current_price + '</div>' : '')
+    + '</div>';
+
+    var ret5 = payload.returns && payload.returns['5d'] != null ? payload.returns['5d'] : null;
+  var ret10 = payload.returns && payload.returns['10d'] != null ? payload.returns['10d'] : null;
+  var ret20 = payload.returns && payload.returns['20d'] != null ? payload.returns['20d'] : null;
+  console.log('[Analysis] ret5=' + ret5 + ' ret10=' + ret10 + ' ret20=' + ret20);
+
+  var gridHtml = '<div class="analysis-grid">'
+    + '<div class="analysis-card"><div class="analysis-card-title">近期涨幅</div><div class="analysis-card-body">'
+    + '<div class="return-row"><span>5日</span><span class="' + getToneClassName(ret5) + '">' + formatSignedPercent(ret5) + '</span></div>'
+    + '<div class="return-row"><span>10日</span><span class="' + getToneClassName(ret10) + '">' + formatSignedPercent(ret10) + '</span></div>'
+    + '<div class="return-row"><span>20日</span><span class="' + getToneClassName(ret20) + '">' + formatSignedPercent(ret20) + '</span></div>'
+    + '</div></div>'
+    + '<div class="analysis-card"><div class="analysis-card-title">趋势判断</div><div class="analysis-card-body">'
+    + '<div class="trend-badge ' + trendClass + '">' + trendLabel + '</div>'
+    + (payload.volatility != null ? '<div class="analysis-meta">日均波动 ' + payload.volatility + '%</div>' : '')
+    + '</div></div>'
+    + '</div>';
+  var signalsHtml = '<div class="analysis-signals">'
+    + '<div class="analysis-card"><div class="analysis-card-title signal-title-bullish">利好因素</div><div class="analysis-card-body">' + bullishHtml + '</div></div>'
+    + '<div class="analysis-card"><div class="analysis-card-title signal-title-bearish">利空因素</div><div class="analysis-card-body">' + bearishHtml + '</div></div>'
+    + '</div>';
+
+  var newsCardHtml = '<div class="analysis-card"><div class="analysis-card-title">相关热点</div><div class="analysis-card-body">' + newsHtml + '</div></div>';
+
+  stockAnalysisResult.innerHTML = headerHtml + gridHtml + signalsHtml + modelHtml + newsCardHtml;
 }
 
 function renderAlerts(payload) {
@@ -2181,15 +2213,90 @@ historyTable?.addEventListener("click", (event) => {
     .catch((error) => setStatus(`当日涨跌图加载失败: ${error.message}`));
 });
 
-timelineSymbolInput?.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  const target = event.currentTarget;
-  if (!(target instanceof HTMLInputElement)) return;
-  fetchJson(`/api/timeline/${encodeURIComponent(target.value.trim())}`)
-    .then((payload) => renderTimeline(payload))
-    .catch((error) => setStatus(`时间线加载失败: ${error.message}`));
-});
+// AI Stock Analysis flow
+(function() {
+  const searchInput = document.querySelector("#timelineSymbolInput");
+  const searchBtn = document.querySelector("#analysisSearchBtn");
+  const previewDiv = document.querySelector("#analysisStockPreview");
+  const progressDiv = document.querySelector("#analysisProgress");
+  const progressFill = document.querySelector("#analysisProgressFill");
+  const progressText = document.querySelector("#analysisProgressText");
+  const resultDiv = document.querySelector("#stockAnalysisResult");
+
+  let currentSymbol = "";
+
+  function doSearch() {
+    const code = (searchInput?.value || "").trim();
+    if (!code) return;
+    currentSymbol = code;
+    if (resultDiv) { resultDiv.innerHTML = ""; resultDiv.style.display = "none"; }
+    if (previewDiv) { previewDiv.style.display = "block"; previewDiv.innerHTML = '<div class="placeholder-row" style="padding:8px">搜索中...</div>'; }
+    if (progressDiv) progressDiv.style.display = "none";
+    fetchJson("/api/stock-info/" + encodeURIComponent(code))
+      .then((data) => {
+        if (data && data.name && previewDiv) {
+          const tone = getToneClassName(data.change_pct);
+          previewDiv.innerHTML = '<div class="preview-card">'
+            + '<div class="preview-left"><div class="preview-name">' + escapeHtml(data.name || code) + '</div><div class="preview-code">' + escapeHtml(data.symbol || code) + (data.date ? ' | ' + data.date : '') + '</div></div>'
+            + '<div class="preview-mid"><div class="preview-price ' + tone + '">' + (data.price ?? "-") + '</div><div class="preview-change ' + tone + '">' + formatSignedPercent(data.change_pct) + '</div></div>'
+            + '<button id="analysisStartBtn" class="btn btn-accent" type="button">AI 分析</button>'
+            + '</div>';
+          document.querySelector("#analysisStartBtn")?.addEventListener("click", startAnalysis);
+        } else if (previewDiv) {
+          previewDiv.innerHTML = '<div class="placeholder-row" style="padding:8px">未找到 "' + escapeHtml(code) + '"，请检查代码</div>';
+        }
+      })
+      .catch(() => { if (previewDiv) previewDiv.innerHTML = '<div class="placeholder-row" style="padding:8px">搜索失败，请检查网络</div>'; });
+  }
+
+  function startAnalysis() {
+    if (!currentSymbol) return;
+    if (resultDiv) resultDiv.innerHTML = "";
+    if (previewDiv) previewDiv.style.display = "none";
+    if (progressDiv) progressDiv.style.display = "flex";
+    const steps = [
+      {pct: 10, text: "获取行情数据..."},
+      {pct: 30, text: "计算技术指标..."},
+      {pct: 50, text: "分析趋势与波动..."},
+      {pct: 70, text: "查询模型信号..."},
+      {pct: 85, text: "检索相关热点..."},
+      {pct: 95, text: "生成分析报告..."},
+    ];
+    let stepIdx = 0;
+    function nextStep() {
+      if (stepIdx < steps.length) {
+        const s = steps[stepIdx];
+        if (progressFill) progressFill.style.width = s.pct + "%";
+        if (progressText) progressText.textContent = s.text;
+        stepIdx++;
+        setTimeout(nextStep, 400 + Math.random() * 300);
+      }
+    }
+    nextStep();
+
+    fetchJson("/api/stock-analysis/" + encodeURIComponent(currentSymbol))
+      .then((payload) => {
+        // Wait for progress bar to finish
+        setTimeout(() => {
+          if (progressFill) progressFill.style.width = "100%";
+          if (progressText) progressText.textContent = "分析完成";
+          setTimeout(() => {
+            if (progressDiv) progressDiv.style.display = "none";
+            if (previewDiv) previewDiv.style.display = "block";
+            if (resultDiv) resultDiv.style.display = "flex";
+            renderStockAnalysis(payload);
+          }, 500);
+        }, 600);
+      })
+      .catch((error) => {
+        if (progressDiv) progressDiv.style.display = "none";
+        if (previewDiv) { previewDiv.style.display = "block"; previewDiv.innerHTML = '<div class="placeholder-row" style="padding:8px">分析失败: ' + escapeHtml(error.message) + '</div>'; }
+      });
+  }
+
+  searchBtn?.addEventListener("click", doSearch);
+  searchInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doSearch(); } });
+})();
 
 stockSearchInput?.addEventListener("input", (event) => {
   const target = event.target;

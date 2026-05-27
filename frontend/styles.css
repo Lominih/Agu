@@ -419,8 +419,38 @@ p {
 
 .market-sector-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
+}
+
+.market-sector-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.market-sector-grid-2col .market-sector-row {
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.market-sector-grid-2col .market-sector-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-sector-grid-2col .market-sector-extra {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-sector-grid-2col .market-sector-change {
+  font-size: 13px;
 }
 
 .market-sector-row {
@@ -479,7 +509,7 @@ p {
 
 .market-sector-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
@@ -662,10 +692,10 @@ p {
 
 .market-sector-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: center;
-  padding: 10px 10px 9px;
+  padding: 12px 14px 11px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.03);
 }
@@ -1818,6 +1848,286 @@ body.history-expanded .page.active {
   .history-toolbar-group-right {
     margin-left: 0;
   }
+}
+
+
+
+/* Stock Analysis */
+.stock-analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100,120,140,0.3) transparent;
+}
+
+.analysis-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.03);
+}
+
+.analysis-stock-name {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.analysis-symbol {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.analysis-price {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analysis-signals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analysis-card {
+  border-radius: 14px;
+  border: 1px solid rgba(148,163,184,0.1);
+  background: rgba(6,10,16,0.95);
+  overflow: hidden;
+}
+
+.analysis-card-title {
+  padding: 10px 14px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.signal-title-bullish {
+  color: #ff6b66;
+}
+
+.signal-title-bearish {
+  color: #4ecb71;
+}
+
+.analysis-card-body {
+  padding: 4px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.return-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  padding: 2px 0;
+}
+
+.analysis-value {
+  font-weight: 700;
+}
+
+.trend-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.trend-badge.news-positive {
+  background: rgba(78,203,113,0.12);
+}
+
+.trend-badge.news-negative {
+  background: rgba(255,107,102,0.12);
+}
+
+.trend-badge.news-neutral {
+  background: rgba(148,163,184,0.1);
+}
+
+.analysis-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.signal-item {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.signal-bullish {
+  background: rgba(255,107,102,0.08);
+  color: #ff8a80;
+  border-left: 3px solid #ff6b66;
+}
+
+.signal-bearish {
+  background: rgba(78,203,113,0.08);
+  color: #69f0ae;
+  border-left: 3px solid #4ecb71;
+}
+
+.model-signal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  padding: 2px 0;
+}
+
+.model-signal-reason {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+}
+
+
+
+/* Analysis search & preview */
+.analysis-search-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+  align-items: stretch;
+}
+
+.btn {
+  padding: 10px 20px;
+  border-radius: 12px;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #1f9d85, #17b89e);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #17b89e, #1fd8b4);
+  transform: translateY(-1px);
+}
+
+.btn-accent {
+  background: linear-gradient(135deg, #ff6b66, #ff8a80);
+  color: #fff;
+  padding: 8px 18px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+
+.btn-accent:hover {
+  background: linear-gradient(135deg, #ff8a80, #ffab91);
+  transform: translateY(-1px);
+}
+
+.analysis-preview {
+  margin-bottom: 12px;
+}
+
+.preview-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(148,163,184,0.1);
+  background: rgba(6,10,16,0.95);
+}
+
+.preview-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.preview-name {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.preview-code {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.preview-mid {
+  text-align: right;
+  margin-right: 8px;
+}
+
+.preview-price {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.preview-change {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Progress bar */
+.analysis-progress {
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(148,163,184,0.1);
+  background: rgba(6,10,16,0.95);
+  margin-bottom: 12px;
+}
+
+.analysis-progress-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(148,163,184,0.15);
+  overflow: hidden;
+}
+
+.analysis-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #1f9d85, #4ecb71);
+  transition: width 0.4s ease;
+}
+
+.analysis-progress-text {
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
 }
 
 @media (max-width: 760px) {

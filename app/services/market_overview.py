@@ -361,6 +361,44 @@ def get_us_industry_leaders(limit: int = 6, trade_date: str | None = None) -> li
     normalized_items = [dict(item, trade_date=trade_date or item.get("trade_date")) for item in cached_items]
     return normalized_items[:limit]
 
+def get_a_share_industry_rotation(limit: int = 20) -> list[dict[str, Any]]:
+    def _builder() -> list[dict[str, Any]]:
+        df = ak.stock_board_industry_summary_ths()
+        results = []
+        for _, row in df.iterrows():
+            name = str(row.get("板块", "")).strip()
+            if not name:
+                continue
+            change_pct = _safe_float(row.get("涨跌幅"))
+            up_count = _safe_float(row.get("上涨家数"))
+            down_count = _safe_float(row.get("下跌家数"))
+            total_stocks = int((up_count or 0) + (down_count or 0))
+            leader_name = str(row.get("领涨股", "")).strip() or None
+            leader_price = _safe_float(row.get("领涨股-最新价"))
+            leader_change = _safe_float(row.get("领涨股-涨跌幅"))
+            turnover = _safe_float(row.get("总成交额"))
+            net_inflow = _safe_float(row.get("净流入"))
+            score = round((change_pct or 0) * math.log(total_stocks + 1, 2), 4) if total_stocks else None
+            results.append({
+                "name": name,
+                "change_pct": _format_signed_number(change_pct),
+                "stocks": total_stocks,
+                "up_count": int(up_count or 0),
+                "down_count": int(down_count or 0),
+                "turnover": turnover,
+                "net_inflow": net_inflow,
+                "leader_name": leader_name,
+                "leader_price": leader_price,
+                "leader_change_pct": leader_change,
+                "score": score,
+                "source": "同花顺行业一览表",
+            })
+        results.sort(key=lambda x: (x.get("score") or float("-inf"), x.get("change_pct") or float("-inf")), reverse=True)
+        return results
+
+    cached = _get_cached_value("a_share_industry_rotation", ttl_seconds=60 * 15, builder=_builder)
+    return cached[:limit]
+
 
 def get_market_overview(limit: int = 6) -> dict:
     warnings: list[str] = []
@@ -394,15 +432,26 @@ def get_market_overview(limit: int = 6) -> dict:
         section_status["us_industry_leaders"] = "failed"
     sections["us_industry_leaders"] = us_industry_leaders
 
+    try:
+        a_share_rotation = get_a_share_industry_rotation(limit=max(limit, 20))
+        section_status["a_share_rotation"] = "fresh"
+    except Exception as exc:
+        warnings.append(f"A股行业轮动数据暂不可用: {exc}")
+        a_share_rotation = []
+        section_status["a_share_rotation"] = "failed"
+    sections["a_share_rotation"] = a_share_rotation
+
     payload = {
         "updated_at": _now_iso(),
         "warnings": warnings,
         "shanghai": sections["shanghai"],
         "nasdaq_previous": sections["nasdaq_previous"],
-        "top_sectors": [],
+        "top_sectors": sections["a_share_rotation"][:6],
         "us_sector_leaders": sections["us_industry_leaders"],
         "us_industry_leaders": sections["us_industry_leaders"],
         "us_industry_source": "同花顺美股涨幅榜分页 + 同花顺公司概况页所属行业聚合",
+        "a_share_rotation": sections["a_share_rotation"],
+        "a_share_source": "同花顺行业一览表",
         "meta": {
             "status": "fresh" if not warnings else "degraded",
             "section_status": section_status,

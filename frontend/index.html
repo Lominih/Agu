@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>A-Share Local Lab</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260526c" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260528b" />
   </head>
   <body>
     <main class="app-shell">
@@ -25,9 +25,9 @@
           <button class="nav-item" data-page="portfolio" type="button">模拟盘</button>
           <button class="nav-item" data-page="hot" type="button">热点快报</button>
           <button class="nav-item" data-page="screen" type="button">条件选股</button>
-          <button class="nav-item" data-page="rotation" type="button">行业轮动</button>
+          <button class="nav-item" data-page="rotation" type="button">A股行业轮动</button>
           <button class="nav-item" data-page="prepost" type="button">盘前盘后</button>
-          <button class="nav-item" data-page="timeline" type="button">事件时间线</button>
+          <button class="nav-item" data-page="timeline" type="button">AI分析</button>
           <button class="nav-item" data-page="alerts" type="button">预警通知</button>
         </nav>
 
@@ -117,16 +117,6 @@
 
             <section class="cards home-cards" id="overviewCards"></section>
             <section class="metric-grid" id="modelMetricsCards"></section>
-
-            <section class="panel home-sector-panel">
-              <div class="panel-head">
-                <div>
-                  <h3>美股上一交易日领涨行业</h3>
-                  <p>按同花顺美股涨幅榜与公司概况页的所属行业聚合展示，支持失败后回退到最近成功缓存。</p>
-                </div>
-              </div>
-              <div id="homeUsLeaderList" class="market-sector-grid"></div>
-            </section>
 
             <section class="panel status-grid">
               <div class="status-card">
@@ -436,8 +426,8 @@
             <section class="panel panel-fill">
               <div class="panel-head">
                 <div>
-                  <h3>行业轮动</h3>
-                  <p>板块 / 行业领涨概览。</p>
+                  <h3>A股行业轮动</h3>
+                  <p>板块 / A股行业领涨概览。</p>
                 </div>
               </div>
               <div id="rotationList" class="market-sector-grid"></div>
@@ -460,14 +450,22 @@
             <section class="panel panel-fill">
               <div class="panel-head">
                 <div>
-                  <h3>事件时间线</h3>
-                  <p>搜索后进入单股时间线回看。</p>
+                  <h3>AI 股票分析</h3>
+                  <p>输入代码搜索股票，点击分析获取多维度 AI 报告。</p>
                 </div>
               </div>
-              <div class="search-box">
-                <input id="timelineSymbolInput" type="text" placeholder="输入股票代码，如 600519" />
+              <div class="analysis-search-row">
+                <div class="search-box" style="flex:1;margin-bottom:0">
+                  <input id="timelineSymbolInput" type="text" placeholder="输入股票代码，如 600519" autocomplete="off" />
+                </div>
+                <button id="analysisSearchBtn" class="btn btn-primary" type="button">搜索</button>
               </div>
-              <div id="timelineList" class="hot-news-list"></div>
+              <div id="analysisStockPreview" class="analysis-preview" style="display:none"></div>
+              <div id="analysisProgress" class="analysis-progress" style="display:none">
+                <div class="analysis-progress-bar"><div id="analysisProgressFill" class="analysis-progress-fill"></div></div>
+                <div id="analysisProgressText" class="analysis-progress-text">准备中...</div>
+              </div>
+              <div id="stockAnalysisResult" class="stock-analysis"></div>
             </section>
           </section>
 
@@ -565,6 +563,6 @@
 
     <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
-    <script src="/assets/app.js?v=20260526c"></script>
+    <script src="/assets/app.js?v=20260528b"></script>
   </body>
 </html>
