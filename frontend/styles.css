@@ -465,15 +465,18 @@ p {
 }
 
 .market-sector-rank {
-  width: 56px;
+  min-width: 48px;
   justify-self: start;
-  padding: 6px 8px;
+  padding: 0 8px;
   border-radius: 10px;
   background: rgba(31, 157, 133, 0.12);
   color: #8bf5e4;
   font-size: 12px;
   font-weight: 800;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .market-sector-main {
@@ -2128,6 +2131,73 @@ body.history-expanded .page.active {
   font-size: 13px;
   color: var(--muted);
   text-align: center;
+}
+
+
+/* Page loading spinner */
+.page-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.page-loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border: 3px solid rgba(148, 163, 184, 0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pageLoadingSpin 0.7s linear infinite;
+  z-index: 10;
+}
+
+@keyframes pageLoadingSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Search suggestions */
+.search-suggestions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 0 2px;
+}
+
+.search-suggestions-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.search-suggestion-chip {
+  padding: 4px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(31, 157, 133, 0.1);
+  color: #8bf5e4;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.search-suggestion-chip:hover {
+  background: rgba(31, 157, 133, 0.22);
+  transform: translateY(-1px);
+}
+
+/* Sidebar data source */
+.sidebar-data-source {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+  margin-top: -4px;
+  padding: 0 4px;
+  opacity: 0.7;
 }
 
 @media (max-width: 760px) {

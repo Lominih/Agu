@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from pathlib import Path
@@ -422,6 +423,19 @@ def train_model(feature_df: pd.DataFrame, output_path: Path) -> dict[str, Any]:
 
 
 def load_model(model_path: Path) -> LGBMRegressor:
+    import logging
+    _MAX_PICKLE_SIZE = 100 * 1024 * 1024  # 100 MB
+    file_size = model_path.stat().st_size
+    if file_size > _MAX_PICKLE_SIZE:
+        raise ValueError(
+            f"Model file {model_path} is {file_size} bytes, exceeds {_MAX_PICKLE_SIZE} byte limit."
+        )
+    if file_size == 0:
+        raise ValueError(f"Model file {model_path} is empty.")
+    logging.getLogger(__name__).warning(
+        "Loading pickle from %s (%d bytes) - only load trusted pickle files.",
+        model_path, file_size,
+    )
     with model_path.open("rb") as fh:
         return pickle.load(fh)
 

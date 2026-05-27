@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed

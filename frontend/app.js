@@ -188,16 +188,21 @@ function switchPage(pageName) {
   pages.forEach((page) => {
     page.classList.toggle("active", page.dataset.page === pageName);
   });
+  const activePage = document.querySelector(`.page[data-page="${pageName}"]`);
+  const removeLoading = () => { if (activePage) activePage.classList.remove("page-loading"); };
+  if (activePage) activePage.classList.add("page-loading");
   if (pageName === "portfolio") {
-    loadPortfolio().catch(() => {});
+    loadPortfolio().catch(() => {}).finally(removeLoading);
   } else if (pageName === "screen") {
-    loadScreen().catch((error) => setStatus(`条件选股加载失败: ${error.message}`));
+    loadScreen().catch((error) => setStatus(`条件选股加载失败: ${error.message}`)).finally(removeLoading);
   } else if (pageName === "rotation") {
-    loadRotation().catch((error) => setStatus(`行业轮动加载失败: ${error.message}`));
+    loadRotation().catch((error) => setStatus(`行业轮动加载失败: ${error.message}`)).finally(removeLoading);
   } else if (pageName === "prepost") {
-    loadPrePost().catch((error) => setStatus(`盘前盘后加载失败: ${error.message}`));
+    loadPrePost().catch((error) => setStatus(`盘前盘后加载失败: ${error.message}`)).finally(removeLoading);
   } else if (pageName === "alerts") {
-    loadAlerts().catch((error) => setStatus(`预警加载失败: ${error.message}`));
+    loadAlerts().catch((error) => setStatus(`预警加载失败: ${error.message}`)).finally(removeLoading);
+  } else {
+    removeLoading();
   }
 }
 
@@ -709,7 +714,7 @@ function renderSearchResults(payload) {
   }
   const items = Array.isArray(payload?.items) ? payload.items : [];
   if (!items.length) {
-    searchResults.innerHTML = `<div class="search-empty">没有匹配结果</div>`;
+    searchResults.innerHTML = `<div class="search-empty">没有匹配结果</div><div class="search-suggestions"><span class="search-suggestions-label">试试搜索：</span><button class="search-suggestion-chip" data-suggestion="600519" type="button">600519</button><button class="search-suggestion-chip" data-suggestion="茅台" type="button">茅台</button><button class="search-suggestion-chip" data-suggestion="比亚迪" type="button">比亚迪</button></div>`;
     return;
   }
   searchResults.innerHTML = items
@@ -1628,14 +1633,12 @@ function renderPrePost(payload) {
 }
 
 function renderStockAnalysis(payload) {
-  console.log("[Analysis] called, element:", !!stockAnalysisResult, "payload:", payload?.symbol, "returns:", payload?.returns);
-  if (!(stockAnalysisResult instanceof HTMLElement)) { console.log("[Analysis] no element"); return; }
+  if (!(stockAnalysisResult instanceof HTMLElement)) { return; }
   if (!payload || !payload.symbol) {
     stockAnalysisResult.innerHTML = '<div class="placeholder-row">输入代码后查看分析</div>';
     return;
   }
   var ret = payload.returns || {};
-  console.log('[Analysis] ret:', JSON.stringify(ret));
   var trendMap = {up: '上升趋势', down: '下降趋势', flat: '横盘整理'};
   var trendClassMap = {up: 'news-positive', down: 'news-negative', flat: 'news-neutral'};
   var trendLabel = trendMap[payload.trend] || '未知';
@@ -1682,7 +1685,6 @@ function renderStockAnalysis(payload) {
     var ret5 = payload.returns && payload.returns['5d'] != null ? payload.returns['5d'] : null;
   var ret10 = payload.returns && payload.returns['10d'] != null ? payload.returns['10d'] : null;
   var ret20 = payload.returns && payload.returns['20d'] != null ? payload.returns['20d'] : null;
-  console.log('[Analysis] ret5=' + ret5 + ' ret10=' + ret10 + ' ret20=' + ret20);
 
   var gridHtml = '<div class="analysis-grid">'
     + '<div class="analysis-card"><div class="analysis-card-title">近期涨幅</div><div class="analysis-card-body">'
@@ -2013,26 +2015,42 @@ async function initializeDashboard() {
 
 async function retrain() {
   setStatus("正在重新训练模型...");
-  if (trainBtn) trainBtn.disabled = true;
+  if (trainBtn) {
+      trainBtn.disabled = true;
+      trainBtn._originalText = trainBtn.textContent;
+      trainBtn.textContent = "训练中...";
+    }
   try {
     const payload = await fetchJson(`/api/train?source=${defaultSource}`, { method: "POST" });
     setStatus(`${payload.message}\n${JSON.stringify(payload.metrics, null, 2)}`);
+    pushToast("模型训练完成", "success");
     await initializeDashboard();
   } finally {
-    if (trainBtn) trainBtn.disabled = false;
+    if (trainBtn) {
+      trainBtn.disabled = false;
+      trainBtn.textContent = trainBtn._originalText || "重新训练模型";
+    }
   }
 }
 
 async function refreshRealData() {
   setStatus("正在启动真实数据后台刷新任务...");
-  if (syncBtn) syncBtn.disabled = true;
+  if (syncBtn) {
+      syncBtn.disabled = true;
+      syncBtn._originalText = syncBtn.textContent;
+      syncBtn.textContent = "刷新中...";
+    }
   try {
     const payload = await fetchJson(`/api/refresh-real-data?pool=${defaultPool}`, { method: "POST" });
     renderTaskStatus(payload.status);
     setStatus(`${payload.message}\n请等待后台脚本完成抓取和训练。`);
+    pushToast("真实数据刷新任务已启动", "success");
     if (payload.status?.state === "running") startRefreshPolling();
   } finally {
-    if (syncBtn) syncBtn.disabled = false;
+    if (syncBtn) {
+      syncBtn.disabled = false;
+      syncBtn.textContent = syncBtn._originalText || "后台刷新真实数据";
+    }
   }
 }
 
@@ -2086,7 +2104,23 @@ async function quickBuyFromSearch(symbol, name) {
 }
 
 refreshBtn?.addEventListener("click", () => {
-  loadDashboard().catch((error) => setStatus(`候选股刷新失败: ${error.message}`));
+  if (refreshBtn) {
+    refreshBtn.disabled = true;
+    refreshBtn._originalText = refreshBtn.textContent;
+    refreshBtn.textContent = "刷新中...";
+  }
+  loadDashboard()
+    .then(() => pushToast("候选股数据已刷新", "success"))
+    .catch((error) => {
+      setStatus(`候选股刷新失败: ${error.message}`);
+      pushToast(`候选股刷新失败: ${error.message}`, "error");
+    })
+    .finally(() => {
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = refreshBtn._originalText || "刷新候选股";
+      }
+    });
 });
 
 watchBtn?.addEventListener("click", () => {
@@ -2330,6 +2364,14 @@ window.addEventListener("keydown", (event) => {
 searchResults?.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+  const chip = target.closest("[data-suggestion]");
+  if (chip instanceof HTMLElement && chip.dataset.suggestion) {
+    if (stockSearchInput instanceof HTMLInputElement) {
+      stockSearchInput.value = chip.dataset.suggestion;
+      stockSearchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    return;
+  }
   const addButton = target.closest("[data-action='add-favorite']");
   if (addButton instanceof HTMLElement && addButton.dataset.symbol) {
     addFavorite(addButton.dataset.symbol, addButton.dataset.name || "", addButton.dataset.kind || "stock")

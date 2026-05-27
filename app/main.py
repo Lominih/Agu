@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from pathlib import Path
 import subprocess
 import sys
+from datetime import datetime
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,7 +36,7 @@ app = FastAPI(title="A股选股本地实验室", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -312,6 +314,9 @@ def watch_intraday(symbol: str, trade_date: str) -> dict:
 @app.get("/api/search")
 def search(query: str, limit: int = 12) -> dict:
     items = search_symbols(query, limit=limit)
+    for item in items:
+        if item.get("history_status") != "local":
+            item["note"] = "该股票不在当前训练池中，仅支持远程查询"
     return {"items": items, "query": query}
 
 
@@ -415,13 +420,18 @@ def rotation() -> dict:
 
 
 @app.get("/api/prepost")
+@app.get("/api/prepost")
 def prepost() -> dict:
-    market = get_market_overview(limit=4)
-    hot = get_hot_news(limit=8, category="tech")
-    return {
-        "updated_at": market.get("updated_at"),
-        "market": market,
-        "items": [
+    warnings = []
+    market = {}
+    hot_items = []
+    try:
+        market = get_market_overview(limit=4)
+    except Exception as exc:
+        warnings.append(f"market overview unavailable: {exc}")
+    try:
+        hot = get_hot_news(limit=8, category="tech")
+        hot_items = [
             {
                 "title": item.get("title"),
                 "summary": item.get("ai_summary") or item.get("summary"),
@@ -429,7 +439,14 @@ def prepost() -> dict:
                 "tone": item.get("ai_tone"),
             }
             for item in hot.get("items", [])[:8]
-        ],
+        ]
+    except Exception as exc:
+        warnings.append(f"hot news unavailable: {exc}")
+    return {
+        "updated_at": market.get("updated_at"),
+        "market": market,
+        "items": hot_items,
+        "warnings": warnings,
     }
 
 
@@ -577,7 +594,7 @@ def stock_analysis(symbol: str) -> dict:
         "model_signal": model_signal,
         "related_news": news_items,
         "price_history": price_items,
-        "updated_at": _now_iso() if "_now_iso" in dir() else None,
+        "updated_at": datetime.now().isoformat(),
     }
 
 @app.get("/api/alerts")
