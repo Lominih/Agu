@@ -315,6 +315,11 @@ p {
   overflow: hidden;
 }
 
+.portfolio-panel-fill:last-child {
+  max-height: 280px;
+  flex-shrink: 0;
+}
+
 .subpanel-head {
   display: grid;
   gap: 6px;
