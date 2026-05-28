@@ -1550,8 +1550,7 @@ function renderPortfolio(snapshot) {
         `)
         .join("")
     : `<tr class="placeholder-row"><td colspan="9">暂无持仓，先从候选股或搜索结果里下第一笔模拟单。</td></tr>`;
-  const trades = Array.isArray(snapshot?.recent_trades) ? snapshot.recent_trades : [];
-  trades = trades.slice(0, 10);
+  const trades = (Array.isArray(snapshot?.recent_trades) ? snapshot.recent_trades : []).slice(0, 10);
   portfolioTradesTable.innerHTML = trades.length
     ? trades
         .map((trade) => `
