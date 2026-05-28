@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+import os
+os.environ.setdefault("NO_PROXY", "*")
 
 from pathlib import Path
 import subprocess
