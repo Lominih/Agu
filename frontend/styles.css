@@ -317,7 +317,7 @@ p {
 }
 
 .portfolio-panel-fill:last-child {
-  max-height: 200px;
+  max-height: 160px;
   flex-shrink: 0;
 }
 
