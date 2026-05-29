@@ -296,7 +296,7 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 12px;
-  min-height: 420px;
+  min-height: 70vh;
   flex: 1 1 auto;
 }
 
