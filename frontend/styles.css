@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #06080d;
   --bg-deep: #0c1118;
   --panel: rgba(16, 22, 31, 0.94);
@@ -296,8 +296,7 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 12px;
-  min-height: 70vh;
-  flex: 1 1 auto;
+  align-items: start;
 }
 
 .portfolio-panel {
@@ -317,7 +316,7 @@ p {
 }
 
 .portfolio-panel-fill:last-child {
-  max-height: 120px;
+  max-height: 260px;
   flex-shrink: 0;
 }
 
@@ -822,7 +821,7 @@ p {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  padding-bottom: 16px;
+  padding-bottom: 24px;
   animation: pageSlideUp 240ms ease;
 }
 
@@ -917,7 +916,7 @@ p {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
 }
 
@@ -998,7 +997,7 @@ p {
 }
 
 .metric-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .metric-grid .card .value {
@@ -1018,6 +1017,7 @@ p {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: visible;
 }
 
 .panel-head {
