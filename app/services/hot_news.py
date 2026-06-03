@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Any, Callable
 
 import akshare as ak
@@ -45,6 +46,27 @@ _SECTOR_RULES: list[tuple[tuple[str, ...], str]] = [
     (("石油", "原油", "天然气"), "油气"),
 ]
 
+_FETCH_TIMEOUT = 10.0
+
+def _fetch_with_timeout(fetcher: Callable[[int], list[dict[str, Any]]], limit: int, label: str) -> list[dict[str, Any]]:
+    import threading
+    result: list[dict[str, Any]] = []
+    exc_holder: list[BaseException] = []
+
+    def _run():
+        try:
+            result.extend(fetcher(limit))
+        except BaseException as exc:
+            exc_holder.append(exc)
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout=_FETCH_TIMEOUT)
+    if worker.is_alive():
+        raise TimeoutError(f"{label} timed out after {_FETCH_TIMEOUT}s")
+    if exc_holder:
+        raise exc_holder[0]
+    return result
 _SPECIAL_AI_RULES: list[tuple[tuple[str, ...], str, str]] = [
     (("冲突", "战争", "空袭", "打击"), "利好黄金原油", "positive"),
     (("油价大幅下跌", "国际油价大幅下跌", "原油跌", "油价下跌"), "利空原油链", "negative"),
@@ -322,7 +344,7 @@ def get_hot_news(limit: int = 20, offset: int = 0, category: str = "all", force_
     merged_items: list[dict[str, Any]] = []
     for source_key, fetcher in fetchers:
         try:
-            items = fetcher(240)
+            items = _fetch_with_timeout(fetcher, 240, source_key)
         except Exception as exc:
             errors.append(f"{source_key}: {exc}")
             continue
