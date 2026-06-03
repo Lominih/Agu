@@ -315,6 +315,10 @@ p {
   overflow: hidden;
 }
 
+.portfolio-grid > .portfolio-panel-fill {
+  min-height: 50vh;
+}
+
 .portfolio-panel-fill:last-child {
   max-height: 260px;
   flex-shrink: 0;
