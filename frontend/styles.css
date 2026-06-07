@@ -22,18 +22,13 @@ body {
   margin: 0;
   width: 100%;
   height: 100%;
-}
-
-body {
   overflow: hidden;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--text);
-  background:
-    radial-gradient(circle at top left, rgba(31, 157, 133, 0.12), transparent 28%),
-    radial-gradient(circle at 78% 12%, rgba(255, 91, 87, 0.09), transparent 22%),
-    linear-gradient(180deg, #070b11 0%, #0a1018 52%, #05080d 100%);
+  background:;
   animation: pageFadeIn 360ms ease;
 }
+
 
 button,
 input,
@@ -84,6 +79,11 @@ p {
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: var(--shadow);
   backdrop-filter: blur(12px);
+  padding: 22px 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
 }
 
 .sidebar {
@@ -162,6 +162,10 @@ p {
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .market-nasdaq {
@@ -195,12 +199,6 @@ p {
   text-align: right;
 }
 
-.market-card {
-  padding: 9px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 
 .market-card-head {
   display: flex;
@@ -286,6 +284,7 @@ p {
 .metric-grid {
   display: grid;
   gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .card-compact {
@@ -316,11 +315,12 @@ p {
 }
 
 .portfolio-grid > .portfolio-panel-fill {
-  min-height: 50vh;
+  min-height: 240px;
+  flex: 1 1 auto;
 }
 
 .portfolio-panel-fill:last-child {
-  max-height: 260px;
+  max-height: min(260px, 30vh);
   flex-shrink: 0;
 }
 
@@ -498,12 +498,19 @@ p {
 .market-sector-name {
   font-size: 14px;
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .market-sector-extra {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .market-sector-change {
@@ -514,17 +521,17 @@ p {
 
 .history-dock {
   min-height: 0;
+  min-width: 0;
 }
 
 .history-panel {
   min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(13, 18, 26, 0.98) 0%, rgba(10, 15, 22, 0.96) 100%);
 }
 
-.market-sector-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
 
 .home-sector-panel {
   display: flex;
@@ -665,6 +672,8 @@ p {
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
 }
 
 .brief-tag {
@@ -673,10 +682,6 @@ p {
   border: 1px solid rgba(77, 229, 208, 0.18);
 }
 
-.brief-source {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--muted);
-}
 
 .brief-title {
   color: #edf4fc;
@@ -703,47 +708,6 @@ p {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.market-sector-row {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px 11px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.market-sector-rank {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.market-sector-main {
-  min-width: 0;
-}
-
-.market-sector-name {
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.market-sector-extra {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.market-sector-change {
-  font-size: 15px;
-  font-weight: 800;
-}
 
 .market-up {
   color: #ff6b66 !important;
@@ -804,10 +768,6 @@ p {
 }
 
 .content-pages,
-.history-dock {
-  min-width: 0;
-  min-height: 0;
-}
 
 .content-pages {
   position: relative;
@@ -834,15 +794,10 @@ p {
 .card {
   background: var(--panel);
   border-radius: 26px;
+  padding: 10px 12px;
+  animation: cardRise 280ms ease;
 }
 
-.hero {
-  padding: 22px 24px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-}
 
 .hero-home {
   min-height: 170px;
@@ -879,6 +834,10 @@ p {
 .danger-btn {
   border-radius: 999px;
   font-weight: 700;
+  padding: 6px 11px;
+  font-size: 12px;
+  background: rgba(255, 91, 87, 0.12);
+  color: #ff8b88;
 }
 
 .primary,
@@ -886,6 +845,8 @@ p {
   min-height: 46px;
   padding: 12px 16px;
   font-size: 14px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .primary {
@@ -897,37 +858,21 @@ p {
   background: var(--accent-dark);
 }
 
-.secondary {
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
 
 .mini-btn,
-.danger-btn {
-  padding: 6px 11px;
-  font-size: 12px;
-}
 
 .mini-btn {
   background: rgba(103, 232, 249, 0.1);
   color: #7ee7f7;
 }
 
-.danger-btn {
-  background: rgba(255, 91, 87, 0.12);
-  color: #ff8b88;
-}
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
 
-.card {
-  padding: 10px 12px;
-  animation: cardRise 280ms ease;
-}
 
 @keyframes pageFadeIn {
   from {
@@ -991,18 +936,12 @@ p {
 }
 
 .home-cards,
-.metric-grid {
-  gap: 8px;
-}
 
 .home-cards .card,
 .metric-grid .card {
   min-height: 84px;
 }
 
-.metric-grid {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-}
 
 .metric-grid .card .value {
   font-size: clamp(15px, 1.2vw, 19px);
@@ -1021,7 +960,7 @@ p {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: visible;
+  overflow: auto;
 }
 
 .panel-head {
@@ -1076,12 +1015,6 @@ p {
   line-height: 1.65;
 }
 
-.history-panel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(180deg, rgba(13, 18, 26, 0.98) 0%, rgba(10, 15, 22, 0.96) 100%);
-}
 
 .history-head {
   align-items: center;
@@ -1425,6 +1358,7 @@ td {
   border-bottom: 1px solid var(--line);
   text-align: left;
   white-space: nowrap;
+  font-size: 13px;
 }
 
 th {
@@ -1433,9 +1367,6 @@ th {
   font-weight: 700;
 }
 
-td {
-  font-size: 13px;
-}
 
 .date-link {
   padding: 0;
@@ -1868,7 +1799,6 @@ body.history-expanded .page.active {
 }
 
 
-
 /* Stock Analysis */
 .stock-analysis {
   display: flex;
@@ -2024,7 +1954,6 @@ body.history-expanded .page.active {
   background: rgba(255,255,255,0.02);
   border-radius: 8px;
 }
-
 
 
 /* Analysis search & preview */

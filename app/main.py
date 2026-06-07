@@ -313,13 +313,24 @@ def watch_intraday(symbol: str, trade_date: str) -> dict:
     return payload
 
 
+_SEARCH_CACHE: dict[str, tuple[float, dict]] = {}
+_SEARCH_CACHE_TTL = 300.0
+
 @app.get("/api/search")
 def search(query: str, limit: int = 12) -> dict:
+    import time
+    cache_key = f"{query.strip().lower()}:{limit}"
+    now = time.monotonic()
+    cached = _SEARCH_CACHE.get(cache_key)
+    if cached and now - cached[0] < _SEARCH_CACHE_TTL:
+        return cached[1]
     items = search_symbols(query, limit=limit)
     for item in items:
         if item.get("history_status") != "local":
             item["note"] = "该股票不在当前训练池中，仅支持远程查询"
-    return {"items": items, "query": query}
+    result = {"items": items, "query": query}
+    _SEARCH_CACHE[cache_key] = (now, result)
+    return result
 
 
 @app.get("/api/favorites")
@@ -422,7 +433,6 @@ def rotation() -> dict:
 
 
 @app.get("/api/prepost")
-@app.get("/api/prepost")
 def prepost() -> dict:
     warnings = []
     market = {}
@@ -511,21 +521,26 @@ def stock_analysis(symbol: str) -> dict:
     # Check model picks
     model_signal = None
     try:
-        model = load_model()
+        model = load_model(DEFAULT_MODEL_PATH)
         if model is not None:
-            snapshot = build_scoring_frame()
-            if snapshot is not None:
-                ranked = score_snapshot(model, snapshot)
-                ranked = build_pick_explanations(model, ranked)
-                match = ranked[ranked["symbol"] == symbol] if "symbol" in ranked.columns else ranked.head(0)
-                if not match.empty:
-                    row = match.iloc[0]
-                    model_signal = {
-                        "rank": int(row.get("rank", 0)),
-                        "predicted_return": float(row.get("predicted_return", 0)),
-                        "reason": str(row.get("explanation", "")),
-                        "confidence": str(row.get("confidence", "")),
-                    }
+            price_df = load_price_data(REAL_DATA_PATH, source="real", allow_remote_fetch=False) if REAL_DATA_PATH.exists() else load_price_data(DEFAULT_DATA_PATH)
+            if price_df is not None and not price_df.empty:
+                snapshot = build_scoring_frame(price_df)
+                if snapshot is not None and not snapshot.empty:
+                    ranked = score_snapshot(model, snapshot)
+                    ranked = build_pick_explanations(model, ranked)
+                    latest = ranked.sort_values("date").groupby("symbol", as_index=False).tail(1)
+                    latest = latest.sort_values("predicted_return_5", ascending=False).reset_index(drop=True)
+                    latest["rank"] = range(1, len(latest) + 1)
+                    match = latest[latest["symbol"].astype(str).str.zfill(6) == symbol.zfill(6)] if "symbol" in latest.columns else latest.head(0)
+                    if not match.empty:
+                        row = match.iloc[0]
+                        model_signal = {
+                            "rank": int(row.get("rank", 0)),
+                            "predicted_return": round(float(row.get("predicted_return_5", 0)) * 100, 2),
+                            "reason": str(row.get("reason_summary", "")),
+                            "confidence": str(row.get("confidence_label", "")),
+                        }
     except Exception:
         pass
 
@@ -535,7 +550,10 @@ def stock_analysis(symbol: str) -> dict:
         hot = get_hot_news(limit=20, category="all")
         for item in hot.get("items", []):
             title = str(item.get("title", ""))
-            if name in title or symbol in title or (name and len(name) >= 2 and name[:2] in title):
+            name_match = name and len(name) >= 2 and name in title
+            symbol_match = symbol and symbol in title
+            partial_match = name and len(name) >= 3 and name[:3] in title
+            if name_match or symbol_match or partial_match:
                 news_items.append({
                     "title": title,
                     "time": item.get("published_at", ""),

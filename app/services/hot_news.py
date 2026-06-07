@@ -3,7 +3,7 @@
 from datetime import datetime
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, as_completed
 from typing import Any, Callable
 
 import akshare as ak
@@ -342,16 +342,22 @@ def get_hot_news(limit: int = 20, offset: int = 0, category: str = "all", force_
         ("sina", _fetch_sina),
     ]
     merged_items: list[dict[str, Any]] = []
-    for source_key, fetcher in fetchers:
-        try:
-            items = _fetch_with_timeout(fetcher, 240, source_key)
-        except Exception as exc:
-            errors.append(f"{source_key}: {exc}")
-            continue
-        if not items:
-            errors.append(f"{source_key}: empty result")
-            continue
-        merged_items.extend(items)
+    # Parallel fetching - all sources at once
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        future_map = {
+            pool.submit(_fetch_with_timeout, fetcher, 240, source_key): source_key
+            for source_key, fetcher in fetchers
+        }
+        for future in as_completed(future_map):
+            source_key = future_map[future]
+            try:
+                items = future.result()
+                if not items:
+                    errors.append(f"{source_key}: empty result")
+                    continue
+                merged_items.extend(items)
+            except Exception as exc:
+                errors.append(f"{source_key}: {exc}")
 
     if not merged_items:
         disk_cache = read_json_file(HOT_NEWS_CACHE_PATH, default_factory=lambda: None)
