@@ -2219,3 +2219,63 @@ body.history-expanded .page.active {
 .analysis-result {
   padding: 12px;
 }
+
+
+/* Rolling Backtest */
+.backtest-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+.backtest-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8b9bb4;
+}
+.input-sm {
+  width: 60px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.3);
+  color: #e0e8f0;
+  font-size: 12px;
+  text-align: center;
+}
+.backtest-aggregate {
+  margin-bottom: 16px;
+}
+.backtest-chart-wrap {
+  margin-bottom: 16px;
+}
+.backtest-chart-wrap h3,
+.backtest-windows-wrap h3 {
+  font-size: 13px;
+  color: #8b9bb4;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.backtest-chart-wrap canvas {
+  width: 100%;
+  border-radius: 8px;
+  background: #0c1118;
+}
+.backtest-windows-wrap .data-table {
+  font-size: 11px;
+}
+.backtest-windows-wrap .data-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.meta-text {
+  font-size: 11px;
+  color: #6b7a8d;
+}

@@ -78,6 +78,15 @@ const stockAnalysisResult = document.querySelector("#stockAnalysisResult");
 const timelineSymbolInput = document.querySelector("#timelineSymbolInput");
 const alertsList = document.querySelector("#alertsList");
 const toastStack = document.querySelector("#toastStack");
+const backtestChart = document.querySelector("#backtestChart");
+const backtestAggregate = document.querySelector("#backtestAggregate");
+const backtestWindows = document.querySelector("#backtestWindows");
+const backtestRunBtn = document.querySelector("#backtestRunBtn");
+const backtestStatus = document.querySelector("#backtestStatus");
+const backtestTrainWindow = document.querySelector("#backtestTrainWindow");
+const backtestTestWindow = document.querySelector("#backtestTestWindow");
+const backtestTopN = document.querySelector("#backtestTopN");
+
 
 const defaultSource = "real";
 const defaultPool = "hs300";
@@ -199,6 +208,8 @@ function switchPage(pageName) {
     loadRotation().catch((error) => setStatus(`行业轮动加载失败: ${error.message}`)).finally(removeLoading);
   } else if (pageName === "prepost") {
     loadPrePost().catch((error) => setStatus(`盘前盘后加载失败: ${error.message}`)).finally(removeLoading);
+  } else if (pageName === "backtest") {
+    loadBacktest().catch((error) => setStatus(`滚动回测加载失败: ${error.message}`)).finally(removeLoading);
   } else if (pageName === "alerts") {
     loadAlerts().catch((error) => setStatus(`预警加载失败: ${error.message}`)).finally(removeLoading);
   } else {
@@ -1860,6 +1871,138 @@ async function selectHotNewsCategory(category) {
   await loadHotNews(false, false);
 }
 
+
+
+async function loadBacktest() {
+  if (backtestStatus instanceof HTMLElement) backtestStatus.textContent = "\u8fd0\u884c\u4e2d...";
+  if (backtestRunBtn instanceof HTMLButtonElement) backtestRunBtn.disabled = true;
+  try {
+    const tw = backtestTrainWindow instanceof HTMLInputElement ? backtestTrainWindow.value : "120";
+    const tw2 = backtestTestWindow instanceof HTMLInputElement ? backtestTestWindow.value : "20";
+    const tn = backtestTopN instanceof HTMLInputElement ? backtestTopN.value : "10";
+    const data = await fetchJson(`/api/backtest?train_window=${tw}&test_window=${tw2}&top_n=${tn}`);
+    renderBacktest(data);
+    if (backtestStatus instanceof HTMLElement) backtestStatus.textContent = data.status === "ok" ? `\u5b8c\u6210 ${data.aggregate?.prediction_days || 0} \u5929\u9884\u6d4b` : `\u72b6\u6001: ${data.status}`;
+  } catch (err) {
+    if (backtestStatus instanceof HTMLElement) backtestStatus.textContent = `\u5931\u8d25: ${err.message}`;
+  } finally {
+    if (backtestRunBtn instanceof HTMLButtonElement) backtestRunBtn.disabled = false;
+  }
+}
+
+function renderBacktest(data) {
+  // Aggregate cards
+  if (backtestAggregate instanceof HTMLElement) {
+    const agg = data.aggregate || {};
+    const cards = [
+      { label: "\u7d2f\u8ba1\u6536\u76ca", value: formatSignedPercent(agg.total_return), hint: `\u9884\u6d4b\u5929\u6570 ${agg.prediction_days || 0}` },
+      { label: "\u5e74\u5316\u6536\u76ca", value: agg.annualized_return != null ? formatSignedPercent(agg.annualized_return) : "-", hint: "\u6eda\u52a8\u7b56\u7565\u5e74\u5316" },
+      { label: "\u6700\u5927\u56de\u64a4", value: agg.max_drawdown != null ? formatSignedPercent(agg.max_drawdown) : "-", hint: "\u5386\u53f2\u6700\u5927\u56de\u64a4" },
+      { label: "Sharpe", value: agg.sharpe != null ? Number(agg.sharpe).toFixed(3) : "-", hint: "\u6536\u76ca\u98ce\u9669\u6bd4" },
+      { label: "RankIC", value: agg.rank_ic != null ? Number(agg.rank_ic).toFixed(3) : "-", hint: "\u9884\u6d4b\u6392\u5e8f\u4e0e\u6536\u76ca\u6392\u5e8f\u76f8\u5173" },
+      { label: "\u80dc\u7387", value: agg.hit_rate != null ? `${agg.hit_rate}%` : "-", hint: "\u6b63\u6536\u76ca\u5929\u6570\u5360\u6bd4" },
+    ];
+    backtestAggregate.innerHTML = cards.map((c) => `<article class="card card-compact"><div class="label">${c.label}</div><div class="value">${c.value}</div><div class="hint">${c.hint}</div></article>`).join("");
+  }
+
+  // Equity curve chart
+  if (backtestChart instanceof HTMLCanvasElement && data.equity_curve?.length) {
+    drawBacktestChart(data.equity_curve);
+  } else if (backtestChart instanceof HTMLCanvasElement) {
+    const ctx2 = backtestChart.getContext("2d");
+    if (ctx2) { ctx2.clearRect(0, 0, backtestChart.width, backtestChart.height); }
+  }
+
+  // Windows table
+  if (backtestWindows instanceof HTMLElement) {
+    const wins = data.windows || [];
+    if (!wins.length) {
+      backtestWindows.innerHTML = '<div class="placeholder-row">\u65e0\u7a97\u53e3\u7ed3\u679c</div>';
+      return;
+    }
+    let html = '<table class="data-table"><thead><tr><th>\u7a97\u53e3</th><th>\u8bad\u7ec3\u533a\u95f4</th><th>\u9884\u6d4b\u533a\u95f4</th><th>\u5929\u6570</th><th>\u5e73\u5747\u6536\u76ca</th><th>\u80dc\u7387</th><th>Sharpe</th><th>IC</th><th>RankIC</th></tr></thead><tbody>';
+    wins.forEach((w, idx) => {
+      const retClass = w.avg_return > 0 ? "tone-positive" : w.avg_return < 0 ? "tone-negative" : "";
+      html += `<tr><td>${idx + 1}</td><td>${w.train_start} ~ ${w.train_end}</td><td>${w.test_start} ~ ${w.test_end}</td><td>${w.days}</td><td class="${retClass}">${w.avg_return != null ? w.avg_return.toFixed(2) + "%" : "-"}</td><td>${w.hit_rate != null ? w.hit_rate.toFixed(1) + "%" : "-"}</td><td>${w.sharpe != null ? w.sharpe.toFixed(3) : "-"}</td><td>${w.ic != null ? w.ic.toFixed(3) : "-"}</td><td>${w.rank_ic != null ? w.rank_ic.toFixed(3) : "-"}</td></tr>`;
+    });
+    html += "</tbody></table>";
+    backtestWindows.innerHTML = html;
+  }
+}
+
+function drawBacktestChart(curve) {
+  if (!(backtestChart instanceof HTMLCanvasElement) || !curve.length) return;
+  const ctx2 = backtestChart.getContext("2d");
+  if (!ctx2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = backtestChart.clientWidth || 760;
+  const h = backtestChart.clientHeight || 280;
+  backtestChart.width = Math.floor(w * dpr);
+  backtestChart.height = Math.floor(h * dpr);
+  ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx2.clearRect(0, 0, w, h);
+  ctx2.fillStyle = "#0c1118";
+  ctx2.fillRect(0, 0, w, h);
+
+  const margin = { top: 20, right: 20, bottom: 30, left: 60 };
+  const pw = w - margin.left - margin.right;
+  const ph = h - margin.top - margin.bottom;
+  const values = curve.map((c) => c.cumulative);
+  const minV = Math.min(...values) * 0.998;
+  const maxV = Math.max(...values) * 1.002;
+  const range = maxV - minV || 1;
+  const stepX = pw / Math.max(curve.length - 1, 1);
+  const toY = (v) => margin.top + ((maxV - v) / range) * ph;
+  const toX = (i) => margin.left + stepX * i;
+
+  // Grid
+  ctx2.strokeStyle = "rgba(255,255,255,0.06)";
+  ctx2.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const gy = margin.top + (ph / 4) * g;
+    ctx2.beginPath(); ctx2.moveTo(margin.left, gy); ctx2.lineTo(w - margin.right, gy); ctx2.stroke();
+    const gv = maxV - (range / 4) * g;
+    ctx2.fillStyle = "#6b7a8d"; ctx2.font = "11px monospace"; ctx2.textAlign = "right";
+    ctx2.fillText(gv.toFixed(3), margin.left - 6, gy + 4);
+  }
+
+  // Line
+  ctx2.beginPath();
+  ctx2.strokeStyle = "#00d4aa";
+  ctx2.lineWidth = 2;
+  curve.forEach((c, i) => {
+    const x = toX(i), y = toY(c.cumulative);
+    i === 0 ? ctx2.moveTo(x, y) : ctx2.lineTo(x, y);
+  });
+  ctx2.stroke();
+
+  // Fill under
+  ctx2.lineTo(toX(curve.length - 1), margin.top + ph);
+  ctx2.lineTo(toX(0), margin.top + ph);
+  ctx2.closePath();
+  ctx2.fillStyle = "rgba(0,212,170,0.08)";
+  ctx2.fill();
+
+  // Baseline (1.0)
+  const baseY = toY(1.0);
+  if (baseY > margin.top && baseY < margin.top + ph) {
+    ctx2.strokeStyle = "rgba(255,255,255,0.2)";
+    ctx2.lineWidth = 1;
+    ctx2.setLineDash([4, 4]);
+    ctx2.beginPath(); ctx2.moveTo(margin.left, baseY); ctx2.lineTo(w - margin.right, baseY); ctx2.stroke();
+    ctx2.setLineDash([]);
+  }
+
+  // X labels
+  ctx2.fillStyle = "#6b7a8d"; ctx2.font = "10px monospace"; ctx2.textAlign = "center";
+  const labelIdxs = [0, Math.floor(curve.length / 2), curve.length - 1];
+  labelIdxs.forEach((idx) => {
+    if (idx >= 0 && idx < curve.length) {
+      ctx2.fillText(curve[idx].date, toX(idx), h - 8);
+    }
+  });
+}
+
 function startMarketPolling() {
   stopMarketPolling();
   state.marketPollTimer = window.setInterval(() => {
@@ -2538,6 +2681,10 @@ window.addEventListener("resize", () => {
 syncHistoryLayout();
 syncHotNewsFilterButton();
 startMarketPolling();
+
+if (backtestRunBtn instanceof HTMLButtonElement) {
+  backtestRunBtn.addEventListener("click", () => { loadBacktest(); });
+}
 
 initializeDashboard()
   .then(async () => {

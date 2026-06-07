@@ -275,6 +275,173 @@ def build_backtest_summary(test_df: pd.DataFrame, predictions: np.ndarray, top_n
     }
 
 
+
+def compute_rolling_backtest(
+    feature_df: pd.DataFrame,
+    train_window: int = 120,
+    test_window: int = 20,
+    top_n: int = 10,
+    step: int = 20,
+) -> dict[str, Any]:
+    """True rolling-window backtest.
+
+    Slides a train/test window across the feature DataFrame:
+      - Train on `train_window` trading days
+      - Predict next `test_window` trading days
+      - Step forward by `step` days each iteration
+
+    Returns equity curve, per-window metrics, and aggregate stats.
+    """
+    ordered = feature_df.sort_values("date").reset_index(drop=True)
+    dates = sorted(ordered["date"].unique())
+    n_dates = len(dates)
+
+    if n_dates < train_window + test_window:
+        return {
+            "status": "insufficient_data",
+            "available_dates": n_dates,
+            "required": train_window + test_window,
+            "equity_curve": [],
+            "windows": [],
+            "aggregate": {},
+        }
+
+    # Build date->index mapping
+    date_to_idx = {d: i for i, d in enumerate(dates)}
+
+    equity_curve: list[dict] = []  # {date, daily_return, cumulative}
+    windows: list[dict] = []
+    all_ic: list[float] = []
+    all_rank_ic: list[float] = []
+    cumulative = 1.0
+
+    start = 0
+    while start + train_window + test_window <= n_dates:
+        train_start_date = dates[start]
+        train_end_date = dates[start + train_window - 1]
+        test_start_date = dates[start + train_window]
+        test_end_idx = min(start + train_window + test_window - 1, n_dates - 1)
+        test_end_date = dates[test_end_idx]
+
+        train_mask = (ordered["date"] >= train_start_date) & (ordered["date"] <= train_end_date)
+        test_mask = (ordered["date"] >= test_start_date) & (ordered["date"] <= test_end_date)
+        train_data = ordered.loc[train_mask]
+        test_data = ordered.loc[test_mask].copy()
+
+        if train_data.empty or test_data.empty:
+            start += step
+            continue
+
+        # Train model
+        model = LGBMRegressor(
+            n_estimators=180,
+            learning_rate=0.05,
+            max_depth=5,
+            num_leaves=31,
+            min_child_samples=24,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            random_state=42,
+        )
+        model.fit(train_data[FEATURE_COLUMNS], train_data["future_return_5"])
+        test_data["predicted_return_5"] = model.predict(test_data[FEATURE_COLUMNS])
+
+        # Per-day returns in test window
+        window_ic: list[float] = []
+        window_rank_ic: list[float] = []
+        window_daily_returns: list[float] = []
+
+        test_dates = sorted(day_group_tmp["date"].unique() for _, day_group_tmp in test_data.groupby("date"))
+        test_dates = sorted(test_data["date"].unique())
+        for day_idx, test_date in enumerate(test_dates):
+            day_group = test_data[test_data["date"] == test_date]
+            ranked = day_group.sort_values("predicted_return_5", ascending=False)
+            picked = ranked.head(min(top_n, len(ranked)))
+            ret_5d = float(picked["future_return_5"].mean()) if not picked.empty else 0.0
+            # future_return_5 is a 5-day forward return; use non-overlapping periods for equity curve
+            if day_idx % 5 == 0:
+                cumulative *= (1 + ret_5d)
+                equity_curve.append({
+                    "date": pd.Timestamp(test_date).strftime("%Y-%m-%d"),
+                    "period_return": round(ret_5d * 100, 4),
+                    "cumulative": round(cumulative, 6),
+                })
+            window_daily_returns.append(ret_5d)
+
+            # IC
+            if len(day_group) > 2:
+                ic = day_group["predicted_return_5"].corr(day_group["future_return_5"])
+                rank_ic = day_group["predicted_return_5"].rank().corr(day_group["future_return_5"].rank())
+                if pd.notna(ic):
+                    window_ic.append(float(ic))
+                    all_ic.append(float(ic))
+                if pd.notna(rank_ic):
+                    window_rank_ic.append(float(rank_ic))
+                    all_rank_ic.append(float(rank_ic))
+
+        # Window summary
+        wr = pd.Series(window_daily_returns, dtype=float)
+        window_sharpe = None
+        if wr.std(ddof=0) > 0:
+            window_sharpe = float((wr.mean() / wr.std(ddof=0)) * np.sqrt(252 / 5))
+
+        windows.append({
+            "train_start": pd.Timestamp(train_start_date).strftime("%Y-%m-%d"),
+            "train_end": pd.Timestamp(train_end_date).strftime("%Y-%m-%d"),
+            "test_start": pd.Timestamp(test_start_date).strftime("%Y-%m-%d"),
+            "test_end": pd.Timestamp(test_end_date).strftime("%Y-%m-%d"),
+            "days": len(window_daily_returns),
+            "avg_return": round(float(wr.mean()) * 100, 4) if not wr.empty else None,
+            "hit_rate": round(float((wr > 0).mean()) * 100, 2) if not wr.empty else None,
+            "sharpe": round(window_sharpe, 4) if window_sharpe is not None else None,
+            "ic": round(float(np.mean(window_ic)), 4) if window_ic else None,
+            "rank_ic": round(float(np.mean(window_rank_ic)), 4) if window_rank_ic else None,
+        })
+
+        start += step
+
+    # Aggregate stats
+    if not equity_curve:
+        return {
+            "status": "no_predictions",
+            "available_dates": n_dates,
+            "equity_curve": [],
+            "windows": [],
+            "aggregate": {},
+        }
+
+    eq_returns = pd.Series([e.get("period_return", e.get("daily_return", 0)) / 100 for e in equity_curve], dtype=float)
+    eq_curve = (1 + eq_returns).cumprod()
+    running_peak = eq_curve.cummax()
+    drawdown = eq_curve / running_peak - 1
+
+    total_return = float(eq_curve.iloc[-1] - 1)
+    n_periods = len(eq_returns)
+    annualized = float(eq_curve.iloc[-1] ** (252 / max(n_periods * 5, 1)) - 1) if n_periods > 0 else None
+    agg_sharpe = None
+    if eq_returns.std(ddof=0) > 0:
+        agg_sharpe = float((eq_returns.mean() / eq_returns.std(ddof=0)) * np.sqrt(252 / 5))
+
+    aggregate = {
+        "total_return": round(total_return * 100, 2),
+        "annualized_return": round(annualized * 100, 2) if annualized is not None else None,
+        "max_drawdown": round(float(drawdown.min()) * 100, 2) if not drawdown.empty else None,
+        "sharpe": round(agg_sharpe, 4) if agg_sharpe is not None else None,
+        "ic": round(float(np.mean(all_ic)), 4) if all_ic else None,
+        "rank_ic": round(float(np.mean(all_rank_ic)), 4) if all_rank_ic else None,
+        "prediction_days": n_periods,
+        "windows_count": len(windows),
+        "hit_rate": round(float((eq_returns > 0).mean()) * 100, 2) if not eq_returns.empty else None,
+    }
+
+    return {
+        "status": "ok",
+        "available_dates": n_dates,
+        "equity_curve": equity_curve,
+        "windows": windows,
+        "aggregate": aggregate,
+    }
+
 def build_rolling_backtest_summary(feature_df: pd.DataFrame, top_n: int = 10) -> dict[str, Any]:
     ordered = feature_df.sort_values("date").reset_index(drop=True)
     if ordered.empty:

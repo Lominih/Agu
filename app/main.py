@@ -29,7 +29,7 @@ from app.services.market_watch import (
     search_symbols,
 )
 from app.services.model_state import read_model_meta, write_model_meta
-from app.services.modeling import build_pick_explanations, load_model, score_snapshot, train_model
+from app.services.modeling import build_pick_explanations, compute_rolling_backtest, load_model, score_snapshot, train_model
 from app.services.paper_portfolio import export_portfolio_state, get_portfolio_snapshot, import_portfolio_state, place_order, reset_portfolio, update_portfolio_settings
 from app.services.refresh_status import get_runtime_refresh_status, write_refresh_status
 
@@ -219,6 +219,17 @@ def overview(source: str = "real") -> dict:
 def model_history() -> dict:
     meta = read_model_meta()
     return {"items": meta.get("history") or [], "updated_at": meta.get("updated_at")}
+
+
+@app.get("/api/backtest")
+def backtest(source: str = "real", train_window: int = 120, test_window: int = 20, top_n: int = 10) -> dict:
+    state_source = resolve_state_source(source)
+    data_source, data_path = get_data_path(state_source)
+    prices = load_price_data(data_path, source=data_source, allow_remote_fetch=False)
+    features = build_features(prices)
+    result = compute_rolling_backtest(features, train_window=train_window, test_window=test_window, top_n=top_n)
+    result["source"] = data_source
+    return result
 
 
 @app.get("/api/market-overview")
