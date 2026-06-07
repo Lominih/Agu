@@ -252,6 +252,7 @@ def get_shanghai_intraday_overview() -> dict:
         "open": round(open_price, 3) if open_price is not None else None,
         "prev_close": round(previous_close, 3) if previous_close is not None else None,
         "current": round(current_price, 3) if current_price is not None else None,
+        "price": round(current_price, 3) if current_price is not None else None,
         "change": _format_signed_number(change),
         "change_pct": _format_signed_number(change_pct),
         "items": items,

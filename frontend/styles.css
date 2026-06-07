@@ -2207,3 +2207,15 @@ body.history-expanded .page.active {
     justify-self: start;
   }
 }
+
+
+/* Pick row styling */
+.pick-row {
+  display: contents;
+}
+
+
+/* Analysis result container */
+.analysis-result {
+  padding: 12px;
+}
